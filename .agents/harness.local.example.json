@@ -1,0 +1,11 @@
+{
+  "cli": "<agent-cli>",
+  "models": {
+    "implement": "<implement-model-id>",
+    "review": "<review-model-id>",
+    "retro": "<retro-model-id>",
+    "addressComments": "<address-comments-model-id>",
+    "triage": "<triage-model-id>"
+  },
+  "reviewBotLogin": "<review-bot-login>"
+}

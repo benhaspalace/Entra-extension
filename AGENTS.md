@@ -19,6 +19,10 @@ architecture (side panel + own PKCE sign-in + Graph v1.0) without saying so.
   (`data-entra-helper`) of a portal menu item; injection must be idempotent and fail silently.
 - Every Graph list call must follow `@odata.nextLink`.
 - Add/adjust vitest tests for every pure module.
+- Use generic agent roles in tracked files; keep CLI, model, and review bot identities
+  only in the ignored `.agents/harness.local.json` or environment variables.
+- Attribute work only to the repository owner; do not add tool credits, reply footers,
+  coauthor trailers, or session links to commits, PRs, or comments.
 
 ## Commands
 
@@ -28,4 +32,33 @@ architecture (side panel + own PKCE sign-in + Graph v1.0) without saying so.
 - `npm run lint`
 - `npm run typecheck`
 
-All four must pass before you finish.
+All four must pass before you finish (`npm run verify` runs them all).
+
+## Workflow
+
+- Work comes from GitHub Issues labelled `agent:ready`. Keep a change scoped to its issue;
+  report unrelated problems instead of fixing them (they become new issues).
+- Read `.agents/LESSONS.md` before starting: mistakes earlier agents made here.
+- The harness (`npm run agent -- <issue>`, see `docs/HARNESS.md`) runs implement → gate →
+  independent review → fix → gate → PR → retrospective.
+- Scripts first: the orchestrator only orchestrates; judgment goes to agents through the
+  shared harness runner. Use `pr:comments`, `pr:reply`, `pr:address`, and `pr:sync`
+  npm scripts for PR reviews and stacked-branch conflicts (see `docs/HARNESS.md`).
+
+## Orchestration
+
+Scripts first. The orchestrator runs scripts and reads their results.
+Delegate judgment and code changes to implementation and review agents through the
+shared harness runner; do not implement, review, or resolve conflicts in the orchestrator.
+Follow `AGENTS.md` and `docs/PLAN.md`.
+
+- Issue work: `npm run agent -- <issue>` (or `--next`).
+- Inspect unresolved reviews: `npm run pr:comments -- <pr>`.
+- Address reviews end-to-end: `npm run pr:address -- <pr>` (`--dry-run` to preview).
+- Reply manually: `npm run pr:reply -- <pr> <commentId> "<message>"` (`--no-resolve` to leave open).
+- Sync stacked PRs and resolve conflicts: `npm run pr:sync -- <branch> <base>`.
+- Quality gate: `npm run verify`.
+
+## Learned rules
+
+Promoted from `.agents/LESSONS.md` after recurring in runs. Keep each rule short and checkable.
