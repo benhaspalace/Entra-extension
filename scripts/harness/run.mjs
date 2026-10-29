@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { runAgent } from './agent.mjs';
 import { loadConfig, resolveModel } from './config.mjs';
 import { run, gh, git } from './process.mjs';
+import { assertClean, redactEnvironmentPaths, stopComment } from './terms.mjs';
 import {
   approvalDigest,
   createIssueSnapshot,
@@ -46,6 +47,7 @@ const started = Date.now();
 const log = (message) => console.log(`[harness] ${message}`);
 
 function bodyFile(name, text) {
+  assertClean(name, text);
   const path = join(TMP, name);
   writeFileSync(path, text);
   return path;
@@ -60,6 +62,7 @@ function agent(role, task, prompt, { readOnly }) {
     dryRun: options.dryRun,
     model: models[task],
   });
+  assertClean(`${role} agent output`, result.output);
   if (!result.ok)
     throw new Error(`${role} agent failed:\n${tail(result.output, 2000)}`);
   return result.stdout;
@@ -71,8 +74,9 @@ function gate() {
   for (const command of config.gate) {
     const [bin, ...args] = command.split(' ');
     const result = run(bin, args, { allowFail: true, shell: true });
-    if (!result.ok)
-      return { ok: false, output: `$ ${command}\n${result.output}` };
+    const output = redactEnvironmentPaths(`$ ${command}\n${result.output}`);
+    assertClean('Quality gate output', output);
+    if (!result.ok) return { ok: false, output };
   }
   return { ok: true, output: '' };
 }
@@ -102,6 +106,7 @@ function pickIssue() {
 }
 
 function setStatus(issue, add, comment) {
+  if (comment) assertClean('Issue comment', comment);
   if (options.dryRun) return log(`status #${issue} -> ${add}`);
   // Drop agent:ready too, or --next would pick the same issue again. Only remove
   // labels the issue has, so gh does not reject the edit.
@@ -141,6 +146,8 @@ function fileFollowUps(issue, findings) {
   for (const finding of findings) {
     const title = finding.title ?? finding.summary.slice(0, 90);
     const body = `${finding.body ?? formatFinding(finding)}\n\nRelated to #${issue}.`;
+    assertClean('Follow-up issue title', title);
+    assertClean('Follow-up issue body', body);
     if (options.dryRun) {
       log(`would file issue: ${title}`);
       continue;
@@ -182,7 +189,8 @@ const comments = JSON.parse(
   ]).stdout,
 ).flat();
 const snapshot = createIssueSnapshot(issue, comments);
-const snapshotPath = bodyFile(`issue-${issue.number}-input.json`, snapshot.text);
+const snapshotPath = join(TMP, `issue-${issue.number}-input.json`);
+writeFileSync(snapshotPath, snapshot.text);
 log(`issue #${issue.number} input: ${snapshotPath}`);
 log(`Required approval: agent:approve sha256:${snapshot.digest}`);
 
@@ -239,6 +247,8 @@ const shared = {
 };
 
 try {
+  assertClean('Issue input', snapshot.text);
+  assertClean('Issue title', issue.title);
   // 1. Implement, with gate-feedback retries.
   let prompt = renderTemplate(template('implement'), shared);
   let result = { ok: false, output: '' };
@@ -338,6 +348,8 @@ try {
   const promoted = promoteRules(read(join(ROOT, 'AGENTS.md')), retro?.promote);
   record.lessonsAdded = lessons.added.length;
   record.rulesPromoted = promoted.added.length;
+  assertClean('Lessons', lessons.markdown);
+  assertClean('Promoted rules', promoted.markdown);
   if (!options.dryRun) {
     writeFileSync(join(AGENTS_DIR, 'LESSONS.md'), lessons.markdown);
     writeFileSync(join(ROOT, 'AGENTS.md'), promoted.markdown);
@@ -347,10 +359,7 @@ try {
     summary: idea.title ?? 'Harness improvement',
     label: config.labels.harness,
   }));
-  const filed = fileFollowUps(
-    issue.number,
-    [...followUps, ...harnessIdeas],
-  );
+  const filed = fileFollowUps(issue.number, [...followUps, ...harnessIdeas]);
   record.findingCounts.followUps = filed.length;
 
   // 5. Commit, push, PR.
@@ -382,6 +391,9 @@ try {
   ]
     .filter(Boolean)
     .join('\n');
+  assertClean('PR body', prBody);
+  assertClean('PR title', issue.title);
+  assertClean('Commit message', `${issue.title}\n\nCloses #${issue.number}.`);
   if (options.dryRun) {
     log(`dry run complete. PR body would be:\n${prBody}`);
   } else {
@@ -420,7 +432,7 @@ try {
   setStatus(
     issue.number,
     config.labels.status.needsHuman,
-    `Agent harness stopped on branch \`${branch}\`:\n\n\`\`\`\n${tail(String(error.message), 3000)}\n\`\`\``,
+    stopComment(error, branch),
   );
   console.error(`[harness] ${error.message}`);
   process.exitCode = 1;

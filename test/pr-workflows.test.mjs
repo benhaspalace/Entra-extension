@@ -8,7 +8,11 @@ import {
 } from '../scripts/pr/github.mjs';
 import { address } from '../scripts/pr/address.mjs';
 import { sync } from '../scripts/pr/sync.mjs';
+import { loadLocalConfig } from '../scripts/harness/config.mjs';
 
+vi.mock('../scripts/harness/config.mjs', () => ({
+  loadLocalConfig: vi.fn(),
+}));
 vi.mock('../scripts/harness/process.mjs', () => ({
   gh: vi.fn(),
   git: vi.fn(),
@@ -49,6 +53,7 @@ let hasConflicts;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  loadLocalConfig.mockReturnValue({});
   mergePending = false;
   mergeConflict = false;
   dirty = false;
@@ -108,6 +113,24 @@ const gitCommands = () => git.mock.calls.map(([args]) => args.join(' '));
 const hasPush = () => git.mock.calls.some(([args]) => args[0] === 'push');
 
 describe('address review workflow', () => {
+  it('rejects all forbidden replies before committing, pushing or replying', () => {
+    loadLocalConfig.mockReturnValue({ forbiddenTerms: ['violet-marker'] });
+    runAgent.mockReturnValue(
+      reply({
+        comments: [
+          decisions.comments[0],
+          { ...decisions.comments[1], reply: 'VIOLET-MARKER' },
+        ],
+      }),
+    );
+    expect(() => address(9)).toThrow(/Review reply.*violet-marker/);
+    expect(gitCommands().some((command) => command.startsWith('commit'))).toBe(
+      false,
+    );
+    expect(hasPush()).toBe(false);
+    expect(replyToThread).not.toHaveBeenCalled();
+  });
+
   it('checks out the head, gates, commits and pushes before replying, resolving fixed only', () => {
     address(9);
     expect(gh).toHaveBeenCalledWith(['pr', 'checkout', '9']);
@@ -176,6 +199,24 @@ describe('address review workflow', () => {
     ).toBe(true);
     expect(hasPush()).toBe(false);
     expect(replyToThread).not.toHaveBeenCalled();
+  });
+
+  it('redacts gate paths before review-fix prompts', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('C:\\violet-marker\\repo');
+    loadLocalConfig.mockReturnValue({ forbiddenTerms: ['violet-marker'] });
+    run.mockReturnValueOnce({
+      ok: false,
+      stdout: 'C:/VIOLET-MARKER/repo/test.ts',
+      output: 'FAIL C:/VIOLET-MARKER/repo/test.ts',
+    });
+    try {
+      address(9);
+      expect(runAgent.mock.calls[1][0].prompt).toContain('FAIL <repo>/test.ts');
+      expect(runAgent.mock.calls[1][0].prompt).not.toMatch(/violet-marker/i);
+      expect(hasPush()).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('publishes after a gate fix succeeds', () => {

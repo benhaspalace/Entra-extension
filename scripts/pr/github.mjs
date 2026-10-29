@@ -1,5 +1,6 @@
 import { gh } from '../harness/process.mjs';
 import { formatReply, shapeThreads } from './lib.mjs';
+import { assertClean } from '../harness/terms.mjs';
 
 const THREADS = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String) {
   repository(owner:$owner,name:$name) {
@@ -56,6 +57,7 @@ export function fetchThreads(pr, repo, unresolvedOnly = true) {
 }
 
 export function replyToThread(pr, repo, thread, message, resolve = true) {
+  assertClean('Review reply', formatReply(message));
   gh(
     [
       'api',

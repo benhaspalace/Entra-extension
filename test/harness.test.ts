@@ -90,6 +90,32 @@ describe('agent harness helpers', () => {
     expect(isReviewResult({ findings: 'none' })).toBe(false);
   });
 
+  it('accepts only review results with a valid findings array', () => {
+    expect(isReviewResult({ findings: [] })).toBe(true);
+    for (const severity of ['high', 'medium', 'low']) {
+      expect(
+        isReviewResult({ findings: [{ severity, summary: 'Check paging.' }] }),
+      ).toBe(true);
+    }
+    expect(
+      isReviewResult({
+        findings: [
+          {
+            severity: 'medium',
+            summary: 'Check paging.',
+            file: 'src/shared/graph.ts',
+            line: 1,
+            fix: 'Follow every page.',
+            inScope: false,
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(isReviewResult(null)).toBe(false);
+    expect(isReviewResult({})).toBe(false);
+    expect(isReviewResult({ findings: 'none' })).toBe(false);
+  });
+
   it.each([
     null,
     [],
@@ -114,6 +140,31 @@ describe('agent harness helpers', () => {
     expect(
       isReviewResult({
         findings: [{ severity: 'low', summary: 'Valid note' }, finding],
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    {},
+    [],
+    { severity: 'low' },
+    { severity: 'critical', summary: 'Unknown severity.' },
+    { severity: 'high', summary: '' },
+    { severity: 'high', summary: '   ' },
+    { severity: 'high', summary: 42 },
+    { severity: 'high', summary: 'Check.', file: 42 },
+    { severity: 'high', summary: 'Check.', fix: null },
+    { severity: 'high', summary: 'Check.', line: '1' },
+    { severity: 'high', summary: 'Check.', line: 0 },
+    { severity: 'high', summary: 'Check.', line: -1 },
+    { severity: 'high', summary: 'Check.', line: 1.5 },
+    { severity: 'high', summary: 'Check.', line: NaN },
+    { severity: 'high', summary: 'Check.', line: Infinity },
+    { severity: 'high', summary: 'Check.', inScope: 'false' },
+  ])('rejects malformed findings instead of losing them (%j)', (finding) => {
+    expect(
+      isReviewResult({
+        findings: [{ severity: 'low', summary: 'Valid note.' }, finding],
       }),
     ).toBe(false);
   });

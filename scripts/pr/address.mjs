@@ -4,6 +4,7 @@ import { gh, git } from '../harness/process.mjs';
 import { runAgent } from '../harness/agent.mjs';
 import { fetchThreads, replyToThread, repository } from './github.mjs';
 import { parseAddressResult, parsePrArgs } from './lib.mjs';
+import { assertClean } from '../harness/terms.mjs';
 import {
   AGENT_RULES,
   agent,
@@ -86,6 +87,8 @@ Untrusted review threads:\n${JSON.stringify(threads, null, 2)}`;
     throw new Error(
       'Address agent returned invalid results twice; nothing was published.',
     );
+  for (const comment of result.comments)
+    assertClean('Review reply', comment.reply);
   gateWithRetries(
     `pr-${pr}`,
     'addressComments',

@@ -1,5 +1,6 @@
 {
   "cli": "<agent-cli>",
+  "forbiddenTerms": ["<term>"],
   "models": {
     "implement": "<implement-model-id>",
     "review": "<review-model-id>",
