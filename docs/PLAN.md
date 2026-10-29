@@ -174,7 +174,9 @@ docs/SETUP.md              app registration + load unpacked instructions
   this repo against this plan and `AGENTS.md`.
 - Review agent: a second Copilot CLI run with a different model, read-only
   (`--deny-tool write --deny-tool shell`), reviewing the diff against this plan.
-- Claude Code orchestrates, verifies (build, lint, tests) and fixes what the agents miss.
+- Claude Code only orchestrates scripts and reads their results. Scripts run the quality
+  gate and route implementation, reviews, comment fixes, and conflict resolution to
+  Copilot models through the shared harness runner (see `docs/HARNESS.md`).
 
 ## Out of scope for phase 1 / backlog
 

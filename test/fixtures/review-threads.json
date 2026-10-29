@@ -1,0 +1,58 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "thread-open",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 123,
+                    "author": { "login": "reviewer" },
+                    "path": "src/shared/graph.ts",
+                    "line": 42,
+                    "body": "Please follow the next page."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "thread-resolved",
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 124,
+                    "author": { "login": "reviewer" },
+                    "path": "src/shared/graph.ts",
+                    "line": 10,
+                    "body": "Already fixed."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "thread-outdated",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 125,
+                    "author": null,
+                    "path": "src/shared/graph.ts",
+                    "line": null,
+                    "body": "Outdated comment."
+                  }
+                ]
+              }
+            }
+          ],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }
+      }
+    }
+  }
+}

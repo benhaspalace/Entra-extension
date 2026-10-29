@@ -2,7 +2,9 @@
   "models": {
     "implement": "gpt-6.1-sol",
     "review": "claude-opus-5.5",
-    "retro": "claude-opus-5.5"
+    "retro": "claude-opus-5.5",
+    "addressComments": "gpt-6.1-sol",
+    "triage": "claude-haiku-5.5"
   },
   "maxAttempts": 3,
   "gate": ["npm run build", "npm test", "npm run lint", "npm run typecheck"],

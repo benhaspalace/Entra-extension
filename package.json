@@ -15,7 +15,11 @@
     "format": "prettier --write .",
     "verify": "npm run build && npm test && npm run lint && npm run typecheck",
     "agent": "node scripts/harness/run.mjs",
-    "agent:labels": "node scripts/harness/setup-labels.mjs"
+    "agent:labels": "node scripts/harness/setup-labels.mjs",
+    "pr:comments": "node scripts/pr/comments.mjs",
+    "pr:reply": "node scripts/pr/reply.mjs",
+    "pr:address": "node scripts/pr/address.mjs",
+    "pr:sync": "node scripts/pr/sync.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

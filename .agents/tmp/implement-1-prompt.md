@@ -11,18 +11,49 @@ End your reply with a short summary of what you changed and anything a reviewer 
 
 ## Issue
 
-# #4 Support localized portal labels for the user-menu anchor
+# #10 Script the PR workflow and route agentic work to Copilot models
 
 ### Goal
-The "Access packages" menu item is anchored by the exact English text "Custom security attributes" (`src/content/menuLabels.ts`). Admins using the portal in another language see no menu item.
+Minimize agentic work in this repo. The orchestrator (Claude Code) should only run scripts and read their results. Any step that can be deterministic must be a script. Steps that need judgment go to GitHub Copilot CLI models through one shared runner, and the right model is picked per task.
 
 ### Acceptance criteria
-- [ ] `customSecurityAttributeLabels` covers at least de, fr, es, it, nl, pt-BR, ja (from the portal's own strings, cited in a comment).
-- [ ] Our own label ("Access packages") is localized from `navigator.language` with English fallback.
-- [ ] Unit tests cover a non-English menu fixture.
+- [ ] **Shared Copilot runner.** Move the `copilot()` function and the prompt-file handling out of `scripts/harness/run.mjs` into `scripts/harness/copilot.mjs`, and use it from `run.mjs`.
+  - Signature: `runCopilot({ role, task, prompt, readOnly, dryRun })`.
+  - It resolves the model from `task` via `.agents/harness.config.json` → `models`.
+  - It writes prompt and reply files under `.agents/tmp/`.
+  - It returns `{ ok, stdout, output }`.
+- [ ] **Model routing in `.agents/harness.config.json` `models`.** Add tasks and keep the existing ones:
+  - `implement`: `gpt-6.1-sol`
+  - `review`: `claude-opus-5.5`
+  - `retro`: `claude-opus-5.5`
+  - `addressComments`: `gpt-6.1-sol`
+  - `triage`: `claude-haiku-5.5` (cheap and quick)
+  - Document the routing rationale in `docs/HARNESS.md`.
+- [ ] **PR scripts in `scripts/pr/`.** Plain Node, no dependencies, using `gh`. Each is also an npm script.
+  - `npm run pr:comments -- <pr>` (`comments.mjs`): prints the PR's **unresolved** review threads as JSON. Use the GraphQL `reviewThreads` with `isResolved`. Each entry has `threadId`, `commentId` (databaseId), `author`, `path`, `line`, `body`.
+  - `npm run pr:reply -- <pr> <commentId> <message>` (`reply.mjs`): replies in the thread, appending the footer line `_🤖 Addressed by [Claude Code](https://claude.com/claude-code)_`, then resolves the thread. Supports `--no-resolve`.
+  - `npm run pr:address -- <pr>` (`address.mjs`): end-to-end, with no orchestrator judgment needed.
+    1. Check out the PR head branch and require a clean tree.
+    2. Fetch unresolved threads.
+    3. Run the `addressComments` Copilot model with all comments. It verifies each one against the code, fixes the valid ones, and must end with a fenced JSON `{"comments":[{"commentId":123,"action":"fixed|declined","reply":"one line"}]}`. Validate it like `isReviewResult`; on invalid output, retry once and then fail.
+    4. Run the gate (`npm run verify`), with up to 2 fix retries through the runner.
+    5. Commit and push.
+    6. Reply to each thread with the commit SHA and the agent's line. Resolve only the `fixed` threads.
+    7. Supports `--dry-run`.
+  - `npm run pr:sync -- <branch> <base>` (`sync.mjs`): for stacked PRs. Merges `origin/<base>` into `<branch>`. On a clean merge it runs the gate and pushes. On conflict it hands the conflicted files to the `implement` model through the runner, then runs the gate, commits and pushes. It aborts the merge if the gate still fails.
+- [ ] **Unit tests (vitest)** for the pure parts: model resolution, comments JSON shaping from a GraphQL fixture, address-result validation, reply footer formatting.
+- [ ] **Project `CLAUDE.md`** at the repo root (short) stating the orchestration rule: scripts first, delegate agentic work to Copilot via the scripts and harness, and keep Claude Code to orchestration. List the npm scripts to use for PR comments, conflicts, and issue work.
+- [ ] `AGENTS.md` and `docs/HARNESS.md` mention the new scripts.
+- [ ] `npm run verify` passes.
 
 ### Pointers
-`src/content/menu.ts`, `test/menu.test.ts`.
+- `scripts/harness/run.mjs` and `lib.mjs` (existing patterns: `run()`, `gh()`, `extractJson`, `isReviewResult`).
+- On Windows `copilot` is a `.cmd` shim: spawn with `shell: true` and quote the `-p` argument (see the existing runner).
+- GraphQL for threads: `repository.pullRequest.reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId author{login} path line body}}}}`. Resolve with `resolveReviewThread`.
+
+### Manual verification
+Run `npm run pr:comments -- 9` against the real PR #9. It should print `[]`, since all threads are resolved.
+
 
 
 

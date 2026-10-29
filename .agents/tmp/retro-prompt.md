@@ -18,7 +18,7 @@ End with exactly one fenced JSON block:
 ```json
 {
   "date": "2026-10-29",
-  "issue": 4,
+  "issue": 10,
   "implModel": "gpt-6.1-sol",
   "reviewModel": "claude-opus-5.5",
   "attempts": 1,
@@ -26,13 +26,22 @@ End with exactly one fenced JSON block:
   "findingCounts": {
     "high": 0,
     "medium": 0,
-    "low": 0,
+    "low": 1,
     "followUps": 0
   },
   "lessonsAdded": 0,
   "rulesPromoted": 0,
   "outcome": "unknown",
-  "reviewFindings": []
+  "reviewFindings": [
+    {
+      "severity": "low",
+      "file": ".agents/tmp/implement-1-prompt.md",
+      "line": 1,
+      "summary": "A harness artifact under the git-ignored .agents/tmp/ directory is tracked in git. Every harness run rewrites it (runCopilot writes <role>-prompt.md), so issue prompts leak into PR diffs and commits. This diff includes it.",
+      "fix": "Run `git rm --cached .agents/tmp/implement-1-prompt.md` (and any other tracked files under .agents/tmp/) so the existing ignore rule applies.",
+      "inScope": false
+    }
+  ]
 }
 ```
 
@@ -95,6 +104,9 @@ All four must pass before you finish (`npm run verify` runs them all).
 - Read `.agents/LESSONS.md` before starting: mistakes earlier agents made here.
 - The harness (`npm run agent -- <issue>`, see `docs/HARNESS.md`) runs implement → gate →
   independent review → fix → gate → PR → retrospective.
+- Scripts first: Claude Code only orchestrates; judgment goes to Copilot through the
+  shared harness runner. Use `pr:comments`, `pr:reply`, `pr:address`, and `pr:sync`
+  npm scripts for PR reviews and stacked-branch conflicts (see `docs/HARNESS.md`).
 
 ## Learned rules
 

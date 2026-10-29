@@ -37,6 +37,9 @@ All four must pass before you finish (`npm run verify` runs them all).
 - Read `.agents/LESSONS.md` before starting: mistakes earlier agents made here.
 - The harness (`npm run agent -- <issue>`, see `docs/HARNESS.md`) runs implement → gate →
   independent review → fix → gate → PR → retrospective.
+- Scripts first: Claude Code only orchestrates; judgment goes to Copilot through the
+  shared harness runner. Use `pr:comments`, `pr:reply`, `pr:address`, and `pr:sync`
+  npm scripts for PR reviews and stacked-branch conflicts (see `docs/HARNESS.md`).
 
 ## Learned rules
 

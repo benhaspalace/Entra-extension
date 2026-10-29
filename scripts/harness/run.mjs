@@ -2,7 +2,6 @@
 // Self-improving agent harness: GitHub issue -> Copilot implement -> gate ->
 // Copilot review -> fix -> gate -> PR -> retrospective (lessons + follow-up issues).
 // Usage: node scripts/harness/run.mjs <issue> | --next [--dry-run] [--no-pr]
-import { spawnSync } from 'node:child_process';
 import {
   appendFileSync,
   existsSync,
@@ -11,6 +10,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { runCopilot } from './copilot.mjs';
+import { run, gh, git } from './process.mjs';
 import {
   appendLessons,
   extractJson,
@@ -37,26 +38,7 @@ const models = {
   retro: options.retroModel ?? config.models.retro,
 };
 const maxAttempts = options.maxAttempts ?? config.maxAttempts;
-const isWindows = process.platform === 'win32';
 const started = Date.now();
-
-function run(command, args, { allowFail = false, shell = false } = {}) {
-  const result = spawnSync(command, args, {
-    cwd: ROOT,
-    encoding: 'utf8',
-    shell,
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  if (result.status !== 0 && !allowFail)
-    throw new Error(
-      `${command} ${args.join(' ')} failed:\n${tail(output, 3000)}`,
-    );
-  return { ok: result.status === 0, output, stdout: result.stdout ?? '' };
-}
-
-const gh = (args, opts) => run('gh', args, opts);
-const git = (args, opts) => run('git', args, opts);
 const log = (message) => console.log(`[harness] ${message}`);
 
 function bodyFile(name, text) {
@@ -65,26 +47,15 @@ function bodyFile(name, text) {
   return path;
 }
 
-/** Run a Copilot CLI agent. The prompt goes through a file to avoid shell quoting. */
-function copilot(role, model, prompt, { readOnly }) {
-  const promptPath = bodyFile(`${role}-prompt.md`, prompt);
-  const relative = promptPath.slice(ROOT.length + 1).replaceAll('\\', '/');
-  const args = [
-    '--model',
-    model,
-    '-p',
-    // cmd.exe needs the quotes (copilot is a .cmd shim); spawn without a shell does not.
-    isWindows
-      ? `"Read ${relative} and follow it exactly."`
-      : `Read ${relative} and follow it exactly.`,
-    '--allow-all-tools',
-    ...(readOnly ? ['--deny-tool', 'write', '--deny-tool', 'shell'] : []),
-    '-s',
-  ];
-  log(`${role}: copilot --model ${model}${readOnly ? ' (read-only)' : ''}`);
-  if (options.dryRun) return '';
-  const result = run('copilot', args, { allowFail: true, shell: isWindows });
-  bodyFile(`${role}-reply.md`, result.output);
+function agent(role, task, prompt, { readOnly }) {
+  const result = runCopilot({
+    role,
+    task,
+    prompt,
+    readOnly,
+    dryRun: options.dryRun,
+    model: models[task === 'implement' ? 'impl' : task],
+  });
   if (!result.ok)
     throw new Error(`${role} agent failed:\n${tail(result.output, 2000)}`);
   return result.stdout;
@@ -239,7 +210,7 @@ try {
   let result = { ok: false, output: '' };
   while (record.attempts < maxAttempts) {
     record.attempts++;
-    copilot(`implement-${record.attempts}`, models.impl, prompt, {
+    agent(`implement-${record.attempts}`, 'implement', prompt, {
       readOnly: false,
     });
     result = gate();
@@ -261,9 +232,9 @@ try {
   let review = null;
   for (let attempt = 1; attempt <= 2 && !isReviewResult(review); attempt++) {
     review = extractJson(
-      copilot(
+      agent(
         `review-${attempt}`,
-        models.review,
+        'review',
         renderTemplate(template('review'), {
           ...shared,
           diff: tail(diff, 80000),
@@ -284,9 +255,9 @@ try {
 
   // 3. Fix in-scope findings, then re-gate.
   if (fixNow.length) {
-    copilot(
+    agent(
       'review-fix',
-      models.impl,
+      'implement',
       renderTemplate(template('fix'), {
         ...shared,
         problems: `An independent reviewer found:\n\n${fixNow.map(formatFinding).join('\n')}\n\nVerify each finding against the code before changing it; skip ones that are wrong and say why.`,
@@ -303,9 +274,9 @@ try {
 
   // 4. Retrospective: lessons for future runs + harness improvement ideas.
   const retro = extractJson(
-    copilot(
+    agent(
       'retro',
-      models.retro,
+      'retro',
       renderTemplate(template('retro'), {
         ...shared,
         agents: read(join(ROOT, 'AGENTS.md')),
