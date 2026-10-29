@@ -74,7 +74,9 @@ Environment variables override local settings: `AGENT_CLI`, `REVIEW_BOT_LOGIN`,
 `AGENT_MODEL_IMPLEMENT`, `AGENT_MODEL_REVIEW`, `AGENT_MODEL_RETRO`,
 `AGENT_MODEL_ADDRESS_COMMENTS`, and `AGENT_MODEL_TRIAGE`. These can also supply settings
 without a local file. Missing or invalid settings fail with setup guidance, including
-during dry runs. Model IDs must contain only letters, digits, dots, underscores, or
+during dry runs. An explicit per-run model override replaces the task default, which
+need not be configured or valid when unused; the selected model and task are still
+validated. Model IDs must contain only letters, digits, dots, underscores, or
 hyphens. Requirements: `gh` signed in to the repo's GitHub host and the agent CLI signed in.
 All review authors' threads remain eligible; the configured bot login does not filter
 out human reviews.
@@ -90,7 +92,11 @@ also preserves its explicit CLI model overrides (`--retro-model` included).
 Prompts and combined stdout/stderr replies are saved as `<role>-prompt.md` and
 `<role>-reply.md` under `.agents/tmp/`. Dry runs save these artifacts but never invoke
 the agent CLI. Machine-readable agent results are parsed from stdout only.
-Metrics record roles rather than model IDs; PR bodies and commits do not identify models.
+Metrics record roles rather than model IDs; PR bodies and commits contain no tool credits.
+Review results must contain a findings array, with a supported severity and a nonempty
+summary for every finding. Optional file/fix fields must be strings, line numbers positive
+integers, and scope flags booleans. Any malformed finding invalidates the entire review:
+the harness retries once, then stops as unreviewed rather than silently dropping defects.
 
 | Task              | Role                                                   |
 | ----------------- | ------------------------------------------------------ |

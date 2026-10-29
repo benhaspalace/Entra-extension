@@ -328,7 +328,6 @@ try {
     );
   const prBody = [
     `Closes #${issue.number}\n`,
-    'Implementation agent and review agent completed the harness workflow.',
     `Gate (\`${shared.gate}\`) passed after ${record.attempts} attempt(s).`,
     fixNow.length
       ? `\n### Review findings fixed\n${fixNow.map(formatFinding).join('\n')}`

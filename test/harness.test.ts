@@ -66,13 +66,56 @@ describe('agent harness helpers', () => {
     expect(extractJson('```json\n{broken\n```')).toBeNull();
   });
 
-  it('accepts only review results with a findings array', () => {
+  it('accepts empty reviews and findings with the required fields', () => {
     expect(isReviewResult({ findings: [] })).toBe(true);
-    expect(isReviewResult({ findings: [{ severity: 'low' }] })).toBe(true);
+    expect(
+      isReviewResult({ findings: [{ severity: 'low', summary: 'A note' }] }),
+    ).toBe(true);
+    expect(
+      isReviewResult({
+        findings: [
+          {
+            severity: 'high',
+            summary: 'A defect',
+            file: 'src/example.ts',
+            line: 12,
+            fix: 'Correct the defect',
+            inScope: false,
+          },
+        ],
+      }),
+    ).toBe(true);
     expect(isReviewResult(null)).toBe(false);
     expect(isReviewResult({})).toBe(false);
     expect(isReviewResult({ findings: 'none' })).toBe(false);
-    expect(isReviewResult({ findings: [null] })).toBe(false);
+  });
+
+  it.each([
+    null,
+    [],
+    'defect',
+    {},
+    { severity: 'low' },
+    { summary: 'Missing severity' },
+    { severity: 'critical', summary: 'Invalid severity' },
+    { severity: 'high', description: 'Wrong summary field' },
+    { severity: 'high', summary: '' },
+    { severity: 'high', summary: ' \n\t' },
+    { severity: 'high', summary: 123 },
+    { severity: 'high', summary: 'Defect', file: 123 },
+    { severity: 'high', summary: 'Defect', fix: {} },
+    { severity: 'high', summary: 'Defect', line: '12' },
+    { severity: 'high', summary: 'Defect', line: 0 },
+    { severity: 'high', summary: 'Defect', line: -1 },
+    { severity: 'high', summary: 'Defect', line: 1.5 },
+    { severity: 'high', summary: 'Defect', inScope: 'false' },
+    { severity: 'high', summary: 'Defect', inScope: null },
+  ])('rejects an entire review containing malformed finding %j', (finding) => {
+    expect(
+      isReviewResult({
+        findings: [{ severity: 'low', summary: 'Valid note' }, finding],
+      }),
+    ).toBe(false);
   });
 
   it('fixes in-scope high/medium findings and files out-of-scope ones', () => {

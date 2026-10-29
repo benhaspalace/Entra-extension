@@ -15,10 +15,9 @@ export function runAgent({
     throw new Error('Agent role must be a safe file name.');
   const config = loadConfig();
   // The issue harness retains its explicit, per-run CLI model overrides.
-  const configured = resolveModel(task, config);
   const model =
     override === undefined
-      ? configured
+      ? resolveModel(task, config)
       : resolveModel(task, { ...config, models: { [task]: override } });
   const directory = join('.agents', 'tmp');
   mkdirSync(directory, { recursive: true });

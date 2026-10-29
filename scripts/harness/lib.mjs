@@ -50,13 +50,29 @@ export function extractJson(text) {
   return null;
 }
 
-/** A review result must be an object with a findings array, or the change counts as unreviewed. */
+/** Reject malformed findings so the caller retries instead of losing review defects. */
 export function isReviewResult(value) {
   return (
     !!value &&
     typeof value === 'object' &&
+    !Array.isArray(value) &&
     Array.isArray(value.findings) &&
-    value.findings.every((finding) => finding && typeof finding === 'object')
+    value.findings.every(
+      (finding) =>
+        finding &&
+        typeof finding === 'object' &&
+        !Array.isArray(finding) &&
+        SEVERITIES.includes(finding.severity) &&
+        typeof finding.summary === 'string' &&
+        finding.summary.trim().length > 0 &&
+        ['file', 'fix'].every(
+          (field) =>
+            finding[field] === undefined || typeof finding[field] === 'string',
+        ) &&
+        (finding.line === undefined ||
+          (Number.isInteger(finding.line) && finding.line > 0)) &&
+        (finding.inScope === undefined || typeof finding.inScope === 'boolean'),
+    )
   );
 }
 

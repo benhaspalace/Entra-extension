@@ -107,6 +107,46 @@ describe('shared agent runner', () => {
     );
   });
 
+  it.each([false, true])(
+    'uses an explicit override without a configured task default (dryRun: %s)',
+    (dryRun) => {
+      vi.stubEnv('AGENT_MODEL_IMPLEMENT', '');
+      runAgent({
+        role: 'override',
+        task: 'implement',
+        prompt: 'Work.',
+        model: 'custom-model',
+        dryRun,
+      });
+      if (dryRun) expect(run).not.toHaveBeenCalled();
+      else
+        expect(run.mock.calls[0][1].slice(0, 2)).toEqual([
+          '--model',
+          'custom-model',
+        ]);
+    },
+  );
+
+  it('uses an explicit override when the task default is missing', () => {
+    readFileSync.mockImplementation((path) =>
+      JSON.stringify(
+        path.endsWith('harness.config.json')
+          ? { tasks: ['implement'] }
+          : { cli: 'agent-cli', reviewBotLogin: 'review-bot[bot]' },
+      ),
+    );
+    runAgent({
+      role: 'override',
+      task: 'implement',
+      prompt: 'Work.',
+      model: 'custom-model',
+    });
+    expect(run.mock.calls[0][1].slice(0, 2)).toEqual([
+      '--model',
+      'custom-model',
+    ]);
+  });
+
   it('returns failures with their reply artifacts and rejects unsafe roles', () => {
     run.mockReturnValue({ ok: false, stdout: '', output: 'CLI unavailable' });
     expect(
