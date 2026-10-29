@@ -2,17 +2,37 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/review-threads.json';
 import { gh } from '../scripts/harness/process.mjs';
 import { fetchThreads, replyToThread } from '../scripts/pr/github.mjs';
+import { loadLocalConfig } from '../scripts/harness/config.mjs';
 
 vi.mock('../scripts/harness/process.mjs', () => ({ gh: vi.fn() }));
+vi.mock('../scripts/harness/config.mjs', () => ({
+  loadLocalConfig: vi.fn(),
+}));
 const repo = { name: 'repo', owner: { login: 'owner' } };
 const success = (value) => ({
   ok: true,
   stdout: JSON.stringify(value),
   output: '',
 });
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  loadLocalConfig.mockReturnValue({});
+});
 
 describe('GitHub PR operations', () => {
+  it('rejects a forbidden reply before posting or resolving', () => {
+    loadLocalConfig.mockReturnValue({ forbiddenTerms: ['violet-marker'] });
+    expect(() =>
+      replyToThread(
+        9,
+        repo,
+        { threadId: 'thread', commentId: 123 },
+        'VIOLET-MARKER',
+      ),
+    ).toThrow(/Review reply.*violet-marker/);
+    expect(gh).not.toHaveBeenCalled();
+  });
+
   it('paginates all review threads and filters resolved threads on every page', () => {
     const first = globalThis.structuredClone(fixture);
     first.data.repository.pullRequest.reviewThreads.pageInfo = {

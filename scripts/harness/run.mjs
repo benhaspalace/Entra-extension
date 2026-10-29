@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { runAgent } from './agent.mjs';
 import { loadConfig, resolveModel } from './config.mjs';
 import { run, gh, git } from './process.mjs';
+import { assertClean, stopComment } from './terms.mjs';
 import {
   appendLessons,
   extractJson,
@@ -41,6 +42,7 @@ const started = Date.now();
 const log = (message) => console.log(`[harness] ${message}`);
 
 function bodyFile(name, text) {
+  assertClean(name, text);
   const path = join(TMP, name);
   writeFileSync(path, text);
   return path;
@@ -55,6 +57,7 @@ function agent(role, task, prompt, { readOnly }) {
     dryRun: options.dryRun,
     model: models[task],
   });
+  assertClean(`${role} agent output`, result.output);
   if (!result.ok)
     throw new Error(`${role} agent failed:\n${tail(result.output, 2000)}`);
   return result.stdout;
@@ -66,6 +69,7 @@ function gate() {
   for (const command of config.gate) {
     const [bin, ...args] = command.split(' ');
     const result = run(bin, args, { allowFail: true, shell: true });
+    assertClean('Quality gate output', result.output);
     if (!result.ok)
       return { ok: false, output: `$ ${command}\n${result.output}` };
   }
@@ -97,6 +101,7 @@ function pickIssue() {
 }
 
 function setStatus(issue, add, comment) {
+  if (comment) assertClean('Issue comment', comment);
   if (options.dryRun) return log(`status #${issue} -> ${add}`);
   // Drop agent:ready too, or --next would pick the same issue again. Only remove
   // labels the issue has, so gh does not reject the edit.
@@ -136,6 +141,8 @@ function fileFollowUps(issue, findings, source) {
   for (const finding of findings) {
     const title = finding.title ?? finding.summary.slice(0, 90);
     const body = `${finding.body ?? formatFinding(finding)}\n\nFound by the ${source} agent while working on #${issue}.`;
+    assertClean('Follow-up issue title', title);
+    assertClean('Follow-up issue body', body);
     if (options.dryRun) {
       log(`would file issue: ${title}`);
       continue;
@@ -203,6 +210,7 @@ const shared = {
 };
 
 try {
+  assertClean('Issue title', issue.title);
   // 1. Implement, with gate-feedback retries.
   let prompt = renderTemplate(template('implement'), shared);
   let result = { ok: false, output: '' };
@@ -302,6 +310,8 @@ try {
   const promoted = promoteRules(read(join(ROOT, 'AGENTS.md')), retro?.promote);
   record.lessonsAdded = lessons.added.length;
   record.rulesPromoted = promoted.added.length;
+  assertClean('Lessons', lessons.markdown);
+  assertClean('Promoted rules', promoted.markdown);
   if (!options.dryRun) {
     writeFileSync(join(AGENTS_DIR, 'LESSONS.md'), lessons.markdown);
     writeFileSync(join(ROOT, 'AGENTS.md'), promoted.markdown);
@@ -328,7 +338,6 @@ try {
     );
   const prBody = [
     `Closes #${issue.number}\n`,
-    'Implementation agent and review agent completed the harness workflow.',
     `Gate (\`${shared.gate}\`) passed after ${record.attempts} attempt(s).`,
     fixNow.length
       ? `\n### Review findings fixed\n${fixNow.map(formatFinding).join('\n')}`
@@ -348,6 +357,9 @@ try {
   ]
     .filter(Boolean)
     .join('\n');
+  assertClean('PR body', prBody);
+  assertClean('PR title', issue.title);
+  assertClean('Commit message', `${issue.title}\n\nCloses #${issue.number}.`);
   if (options.dryRun) {
     log(`dry run complete. PR body would be:\n${prBody}`);
   } else {
@@ -386,7 +398,7 @@ try {
   setStatus(
     issue.number,
     config.labels.status.needsHuman,
-    `Agent harness stopped on branch \`${branch}\`:\n\n\`\`\`\n${tail(String(error.message), 3000)}\n\`\`\``,
+    stopComment(error, branch),
   );
   console.error(`[harness] ${error.message}`);
   process.exitCode = 1;

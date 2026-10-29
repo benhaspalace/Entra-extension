@@ -55,8 +55,22 @@ export function isReviewResult(value) {
   return (
     !!value &&
     typeof value === 'object' &&
+    !Array.isArray(value) &&
     Array.isArray(value.findings) &&
-    value.findings.every((finding) => finding && typeof finding === 'object')
+    value.findings.every(
+      (finding) =>
+        finding &&
+        typeof finding === 'object' &&
+        !Array.isArray(finding) &&
+        SEVERITIES.includes(finding.severity) &&
+        typeof finding.summary === 'string' &&
+        finding.summary.trim().length > 0 &&
+        (finding.file === undefined || typeof finding.file === 'string') &&
+        (finding.fix === undefined || typeof finding.fix === 'string') &&
+        (finding.line === undefined ||
+          (Number.isInteger(finding.line) && finding.line > 0)) &&
+        (finding.inScope === undefined || typeof finding.inScope === 'boolean'),
+    )
   );
 }
 

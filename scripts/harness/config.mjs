@@ -15,10 +15,7 @@ export function resolveModel(task, config) {
   return model;
 }
 
-export function loadConfig(env = process.env) {
-  const config = JSON.parse(
-    readFileSync(join('.agents', 'harness.config.json'), 'utf8'),
-  );
+export function loadLocalConfig() {
   let local = {};
   try {
     local = JSON.parse(readFileSync(LOCAL_PATH, 'utf8'));
@@ -30,6 +27,22 @@ export function loadConfig(env = process.env) {
   }
   if (!local || typeof local !== 'object' || Array.isArray(local))
     throw new Error(`Invalid local configuration. ${guidance}`);
+  if (
+    local.forbiddenTerms !== undefined &&
+    (!Array.isArray(local.forbiddenTerms) ||
+      local.forbiddenTerms.some(
+        (term) => typeof term !== 'string' || !term.trim(),
+      ))
+  )
+    throw new Error('forbiddenTerms must be a list of nonempty strings.');
+  return local;
+}
+
+export function loadConfig(env = process.env) {
+  const config = JSON.parse(
+    readFileSync(join('.agents', 'harness.config.json'), 'utf8'),
+  );
+  const local = loadLocalConfig();
   const cli = env.AGENT_CLI ?? local.cli;
   const reviewBotLogin = env.REVIEW_BOT_LOGIN ?? local.reviewBotLogin;
   if (typeof cli !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(cli))
@@ -47,5 +60,11 @@ export function loadConfig(env = process.env) {
       return [task, env[`AGENT_MODEL_${suffix}`] ?? local.models?.[task]];
     }),
   );
-  return { ...config, cli, reviewBotLogin, models };
+  return {
+    ...config,
+    cli,
+    reviewBotLogin,
+    models,
+    forbiddenTerms: local.forbiddenTerms ?? [],
+  };
 }

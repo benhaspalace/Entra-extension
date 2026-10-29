@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { tail } from './lib.mjs';
+import { checkGit, checkGithub } from './terms.mjs';
 
 export function run(
   command,
@@ -24,5 +25,11 @@ export function run(
   return { ok, stdout: result.stdout ?? '', output };
 }
 
-export const gh = (args, options) => run('gh', args, options);
-export const git = (args, options) => run('git', args, options);
+export const gh = (args, options) => {
+  checkGithub(args, options);
+  return run('gh', args, options);
+};
+export const git = (args, options) => {
+  checkGit(args, (readArgs) => run('git', readArgs));
+  return run('git', args, options);
+};

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { loadConfig, resolveModel } from '../scripts/harness/config.mjs';
+import {
+  loadConfig,
+  loadLocalConfig,
+  resolveModel,
+} from '../scripts/harness/config.mjs';
 import config from '../.agents/harness.config.json';
 import example from '../.agents/harness.local.example.json';
 
@@ -20,6 +24,19 @@ beforeEach(() => {
 });
 
 describe('runtime harness configuration', () => {
+  it('reads the private term list without requiring agent settings', () => {
+    local = { forbiddenTerms: ['violet-marker'] };
+    expect(loadLocalConfig().forbiddenTerms).toEqual(['violet-marker']);
+    expect(example.forbiddenTerms).toEqual(['<term>']);
+    expect(config).not.toHaveProperty('forbiddenTerms');
+    for (const invalid of ['violet-marker', null, [''], ['  '], [17]]) {
+      local.forbiddenTerms = invalid;
+      expect(() => loadLocalConfig()).toThrow(/forbiddenTerms/);
+    }
+    local = {};
+    expect(loadLocalConfig()).toEqual({});
+  });
+
   it('keeps task routing public and identifying values local', () => {
     expect(config).not.toHaveProperty('models');
     expect(config).not.toHaveProperty('cli');

@@ -70,6 +70,10 @@ for one run, use `--impl-model <id>` and `--review-model <id>`. Model defaults l
 in the ignored local file; `.agents/harness.config.json` keeps tasks, gate commands,
 retry limits, and labels.
 
+Per-run overrides (`--impl-model`, `--review-model`, and `--retro-model`) work even
+when the corresponding task has no configured model. Overrides must still be valid
+model IDs for known tasks; only tasks without an override resolve their configured model.
+
 Environment variables override local settings: `AGENT_CLI`, `REVIEW_BOT_LOGIN`,
 `AGENT_MODEL_IMPLEMENT`, `AGENT_MODEL_REVIEW`, `AGENT_MODEL_RETRO`,
 `AGENT_MODEL_ADDRESS_COMMENTS`, and `AGENT_MODEL_TRIAGE`. These can also supply settings
@@ -78,6 +82,24 @@ during dry runs. Model IDs must contain only letters, digits, dots, underscores,
 hyphens. Requirements: `gh` signed in to the repo's GitHub host and the agent CLI signed in.
 All review authors' threads remain eligible; the configured bot login does not filter
 out human reviews.
+
+Set `forbiddenTerms` in the ignored `.agents/harness.local.json` to the owner's
+private list (replace the example's `["<term>"]`, or use `[]` for no restrictions).
+Matching uses literal, case-insensitive substrings, not regular expressions or
+whole words. Never put the real list in tracked files.
+The harness checks agent results, lessons/rules, issue text, PR text, and commit
+messages before publishing. A match stops the issue run with `agent:needs-human`
+and a neutral comment that does not repeat the rejected text. PR replies are
+checked before any review-address commit or reply; the shared GitHub/git boundary
+also checks outbound text and commit contents.
+
+`npm run check:terms` checks both staged blobs and tracked working files, including
+files whose staged and working versions differ. Commits and pushes from the scripts
+run the same check. It is also part of `npm run verify`; without a local list
+(including in CI) it is a no-op and needs no agent CLI/model configuration.
+Errors name the affected label/file and matching term locally, never in the
+neutral policy-stop comment. This is a script guard, not an installed Git hook:
+run `npm run check:terms` before manual commits too.
 
 ### Script-first orchestration and model routing
 
@@ -91,6 +113,13 @@ Prompts and combined stdout/stderr replies are saved as `<role>-prompt.md` and
 `<role>-reply.md` under `.agents/tmp/`. Dry runs save these artifacts but never invoke
 the agent CLI. Machine-readable agent results are parsed from stdout only.
 Metrics record roles rather than model IDs; PR bodies and commits do not identify models.
+
+Review results must contain a `findings` array. Each finding must have a severity
+of `high`, `medium`, or `low` and a nonempty string `summary`. Optional `file` and
+`fix` fields must be strings, `line` must be a positive integer, and `inScope`
+must be a boolean. Invalid results are retried once, then the run stops as
+unreviewed without committing, pushing, or opening a PR; malformed findings are
+never treated as a clean review.
 
 | Task              | Role                                                   |
 | ----------------- | ------------------------------------------------------ |

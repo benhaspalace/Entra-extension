@@ -107,6 +107,44 @@ describe('shared agent runner', () => {
     );
   });
 
+  it.each(['implement', 'review', 'retro'])(
+    'allows a per-run %s override without a configured model',
+    (task) => {
+      readFileSync.mockImplementation((path) =>
+        JSON.stringify(
+          path.endsWith('harness.config.json')
+            ? { tasks: ['implement', 'review', 'retro'] }
+            : { cli: 'agent-cli', reviewBotLogin: 'review-bot[bot]' },
+        ),
+      );
+      runAgent({ role: task, task, prompt: 'Work.', model: 'custom-model' });
+      expect(run.mock.calls[0][1].slice(0, 2)).toEqual([
+        '--model',
+        'custom-model',
+      ]);
+    },
+  );
+
+  it('requires a configured model when no override is supplied', () => {
+    vi.stubEnv('AGENT_MODEL_IMPLEMENT', '');
+    expect(() =>
+      runAgent({ role: 'invalid', task: 'implement', prompt: 'Work.' }),
+    ).toThrow(/Invalid agent model/);
+    vi.stubEnv('AGENT_MODEL_IMPLEMENT', undefined);
+    readFileSync.mockImplementation((path) =>
+      JSON.stringify(
+        path.endsWith('harness.config.json')
+          ? { tasks: ['implement'] }
+          : { cli: 'agent-cli', reviewBotLogin: 'review-bot[bot]' },
+      ),
+    );
+    expect(() =>
+      runAgent({ role: 'missing', task: 'implement', prompt: 'Work.' }),
+    ).toThrow(/No agent model configured/);
+    expect(run).not.toHaveBeenCalled();
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
   it('returns failures with their reply artifacts and rejects unsafe roles', () => {
     run.mockReturnValue({ ok: false, stdout: '', output: 'CLI unavailable' });
     expect(
