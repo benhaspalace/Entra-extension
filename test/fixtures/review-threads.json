@@ -10,7 +10,7 @@
               "comments": {
                 "nodes": [
                   {
-                    "databaseId": 123,
+                    "fullDatabaseId": "4416706313",
                     "author": { "login": "reviewer" },
                     "path": "src/shared/graph.ts",
                     "line": 42,
@@ -25,7 +25,7 @@
               "comments": {
                 "nodes": [
                   {
-                    "databaseId": 124,
+                    "fullDatabaseId": "4416706314",
                     "author": { "login": "reviewer" },
                     "path": "src/shared/graph.ts",
                     "line": 10,
@@ -40,7 +40,7 @@
               "comments": {
                 "nodes": [
                   {
-                    "databaseId": 125,
+                    "fullDatabaseId": "4416706315",
                     "author": null,
                     "path": "src/shared/graph.ts",
                     "line": null,

@@ -25,6 +25,7 @@ vi.mock('../scripts/harness/process.mjs', () => ({
 const originalArgv = process.argv;
 const originalExitCode = process.exitCode;
 let review;
+let retro;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -66,9 +67,12 @@ beforeEach(() => {
       { severity: 'low', summary: 'Keep this note' },
     ],
   };
+  retro = {};
   runAgent.mockImplementation(({ task }) => ({
     ok: true,
-    stdout: JSON.stringify(task === 'review' ? review : {}),
+    stdout: JSON.stringify(
+      task === 'review' ? review : task === 'retro' ? retro : {},
+    ),
   }));
 });
 
@@ -79,6 +83,37 @@ afterEach(() => {
 });
 
 describe('issue harness with mocked external operations', () => {
+  it('keeps follow-up details and issue references without agent attribution', async () => {
+    review = {
+      findings: [
+        {
+          severity: 'high',
+          summary: 'Separate defect',
+          inScope: false,
+        },
+      ],
+    };
+    retro = {
+      harnessIssues: [
+        { title: 'Improve validation', body: 'Validate before publishing.' },
+      ],
+    };
+    await import('../scripts/harness/run.mjs');
+    const bodies = writeFileSync.mock.calls
+      .filter(([path]) => path.endsWith('followup.md'))
+      .map(([, body]) => body);
+    expect(bodies).toEqual([
+      '- **high**: Separate defect\n\nRelated to #12.',
+      'Validate before publishing.\n\nRelated to #12.',
+    ]);
+    expect(bodies.join('\n')).not.toMatch(/agent|model|found by/i);
+    expect(
+      gh.mock.calls.filter(
+        ([args]) => args[0] === 'issue' && args[1] === 'create',
+      ),
+    ).toHaveLength(2);
+  });
+
   it('keeps gate and review details in PR bodies without tool attribution', async () => {
     await import('../scripts/harness/run.mjs');
     const body = writeFileSync.mock.calls.find(([path]) =>

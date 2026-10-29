@@ -18,13 +18,18 @@ export function shapeThreads(response, unresolvedOnly = true) {
     .filter((thread) => !unresolvedOnly || !thread.isResolved)
     .map((thread) => {
       const comment = thread.comments?.nodes?.[0];
-      if (!thread.id || !Number.isSafeInteger(comment?.databaseId))
+      const rawId = comment?.fullDatabaseId;
+      const commentId =
+        typeof rawId === 'string' && /^[1-9]\d*$/.test(rawId)
+          ? Number(rawId)
+          : rawId;
+      if (!thread.id || !Number.isSafeInteger(commentId) || commentId <= 0)
         throw new Error(
           'GitHub returned a review thread without a root comment.',
         );
       return {
         threadId: thread.id,
-        commentId: comment.databaseId,
+        commentId,
         author: comment.author?.login ?? null,
         path: comment.path,
         line: comment.line ?? null,

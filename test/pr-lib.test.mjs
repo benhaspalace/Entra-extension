@@ -47,7 +47,7 @@ describe('PR pure helpers', () => {
     expect(shapeThreads(fixture)).toEqual([
       {
         threadId: 'thread-open',
-        commentId: 123,
+        commentId: 4416706313,
         author: 'reviewer',
         path: 'src/shared/graph.ts',
         line: 42,
@@ -55,7 +55,7 @@ describe('PR pure helpers', () => {
       },
       {
         threadId: 'thread-outdated',
-        commentId: 125,
+        commentId: 4416706315,
         author: null,
         path: 'src/shared/graph.ts',
         line: null,
@@ -81,6 +81,36 @@ describe('PR pure helpers', () => {
     expect(() => shapeThreads(broken)).toThrow(/root comment/);
   });
 
+  it.each(['4416706313', 4416706313, String(Number.MAX_SAFE_INTEGER)])(
+    'normalizes full database ID %s to a safe numeric comment ID',
+    (id) => {
+      const response = globalThis.structuredClone(fixture);
+      response.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes[0].fullDatabaseId =
+        id;
+      expect(shapeThreads(response)[0].commentId).toBe(Number(id));
+    },
+  );
+
+  it.each([
+    null,
+    undefined,
+    '',
+    ' ',
+    '4.4e9',
+    '4416706313.0',
+    'invalid',
+    0,
+    -1,
+    1.5,
+    '9007199254740993',
+    Number.MAX_SAFE_INTEGER + 1,
+  ])('rejects invalid or unsafe full database ID %s', (id) => {
+    const response = globalThis.structuredClone(fixture);
+    response.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes[0].fullDatabaseId =
+      id;
+    expect(() => shapeThreads(response)).toThrow(/root comment/);
+  });
+
   const valid = {
     comments: [
       { commentId: 123, action: 'fixed', reply: 'Added pagination.' },
@@ -95,6 +125,16 @@ describe('PR pure helpers', () => {
   it('requires exactly one well-formed decision for each supplied comment ID', () => {
     expect(isAddressResult(valid, [123, 125])).toBe(true);
     expect(isAddressResult({ comments: [] }, [])).toBe(true);
+    expect(
+      isAddressResult(
+        {
+          comments: [
+            { commentId: 4416706313, action: 'fixed', reply: 'Fixed.' },
+          ],
+        },
+        [4416706313],
+      ),
+    ).toBe(true);
     for (const value of [
       null,
       {},

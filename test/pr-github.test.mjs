@@ -23,7 +23,7 @@ describe('GitHub PR operations', () => {
     second.data.repository.pullRequest.reviewThreads.nodes = [];
     gh.mockReturnValueOnce(success(first)).mockReturnValueOnce(success(second));
     expect(fetchThreads(9, repo).map((thread) => thread.commentId)).toEqual([
-      123, 125,
+      4416706313, 4416706315,
     ]);
     expect(gh).toHaveBeenCalledTimes(2);
     const [args, options] = gh.mock.calls[1];
@@ -35,6 +35,8 @@ describe('GitHub PR operations', () => {
       cursor: 'page-two',
     });
     expect(JSON.parse(options.input).query).toContain('isResolved');
+    expect(JSON.parse(options.input).query).toContain('fullDatabaseId');
+    expect(JSON.parse(options.input).query).not.toMatch(/\bdatabaseId\b/);
   });
 
   it('fails on GraphQL errors and repeated pagination cursors', () => {
@@ -62,13 +64,13 @@ describe('GitHub PR operations', () => {
       replyToThread(
         9,
         repo,
-        { threadId: 'thread', commentId: 123 },
+        { threadId: 'thread', commentId: 4416706313 },
         'abc123: Fixed "quotes" & $text.',
         resolve,
       );
       expect(gh.mock.calls[0][0]).toEqual([
         'api',
-        'repos/owner/repo/pulls/9/comments/123/replies',
+        'repos/owner/repo/pulls/9/comments/4416706313/replies',
         '--method',
         'POST',
         '--input',

@@ -131,11 +131,11 @@ function setStatus(issue, add, comment) {
     ]);
 }
 
-function fileFollowUps(issue, findings, source) {
+function fileFollowUps(issue, findings) {
   const created = [];
   for (const finding of findings) {
     const title = finding.title ?? finding.summary.slice(0, 90);
-    const body = `${finding.body ?? formatFinding(finding)}\n\nFound by the ${source} agent while working on #${issue}.`;
+    const body = `${finding.body ?? formatFinding(finding)}\n\nRelated to #${issue}.`;
     if (options.dryRun) {
       log(`would file issue: ${title}`);
       continue;
@@ -314,7 +314,6 @@ try {
   const filed = fileFollowUps(
     issue.number,
     [...followUps, ...harnessIdeas],
-    'review/retro',
   );
   record.findingCounts.followUps = filed.length;
 

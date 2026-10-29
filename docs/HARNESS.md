@@ -92,7 +92,8 @@ also preserves its explicit CLI model overrides (`--retro-model` included).
 Prompts and combined stdout/stderr replies are saved as `<role>-prompt.md` and
 `<role>-reply.md` under `.agents/tmp/`. Dry runs save these artifacts but never invoke
 the agent CLI. Machine-readable agent results are parsed from stdout only.
-Metrics record roles rather than model IDs; PR bodies and commits contain no tool credits.
+Metrics record roles rather than model IDs; PR bodies, commits, and follow-up issue bodies
+contain no tool credits. Follow-up issues retain a reference to the originating issue.
 Review results must contain a findings array, with a supported severity and a nonempty
 summary for every finding. Optional file/fix fields must be strings, line numbers positive
 integers, and scope flags booleans. Any malformed finding invalidates the entire review:
@@ -122,7 +123,9 @@ npm run pr:sync -- feature-branch base-branch
 
 `pr:comments` prints a JSON array of unresolved review threads, paging all GraphQL
 `reviewThreads`. Each entry represents the thread's first comment and includes
-`threadId`, `commentId` (database ID), `author`, `path`, `line`, and `body`.
+`threadId`, `commentId` (from GraphQL `fullDatabaseId`, normalized to a positive safe
+JavaScript integer), `author`, `path`, `line`, and `body`. IDs beyond JavaScript's safe
+integer range are rejected rather than rounded.
 Deleted authors and unavailable lines are `null`. `pr:reply` takes that root comment ID,
 posts only the supplied message without an attribution footer, then resolves the thread
 unless `--no-resolve` is supplied.

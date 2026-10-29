@@ -6,7 +6,7 @@ const THREADS = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String) {
     pullRequest(number:$pr) {
       reviewThreads(first:100,after:$cursor) {
         nodes { id isResolved comments(first:1) {
-          nodes { databaseId author { login } path line body }
+          nodes { fullDatabaseId author { login } path line body }
         } }
         pageInfo { hasNextPage endCursor }
       }
