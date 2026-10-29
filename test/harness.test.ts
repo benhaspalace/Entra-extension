@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appendLessons,
   extractJson,
+  isReviewResult,
   parseArgs,
   promoteRules,
   renderTemplate,
@@ -31,8 +32,21 @@ describe('agent harness helpers', () => {
       'thinking\n```json\n{"findings":[1]}\n```\nmore\n```json\n{"findings":[]}\n```';
     expect(extractJson(reply)).toEqual({ findings: [] });
     expect(extractJson('Result:\n{"lessons": []}')).toEqual({ lessons: [] });
+    expect(extractJson('{"findings": [{"severity": "high"}]}\nok')).toBeNull();
+    expect(extractJson('{"findings": [{"severity": "high"}]}')).toEqual({
+      findings: [{ severity: 'high' }],
+    });
     expect(extractJson('no json here')).toBeNull();
     expect(extractJson('```json\n{broken\n```')).toBeNull();
+  });
+
+  it('accepts only review results with a findings array', () => {
+    expect(isReviewResult({ findings: [] })).toBe(true);
+    expect(isReviewResult({ findings: [{ severity: 'low' }] })).toBe(true);
+    expect(isReviewResult(null)).toBe(false);
+    expect(isReviewResult({})).toBe(false);
+    expect(isReviewResult({ findings: 'none' })).toBe(false);
+    expect(isReviewResult({ findings: [null] })).toBe(false);
   });
 
   it('fixes in-scope high/medium findings and files out-of-scope ones', () => {

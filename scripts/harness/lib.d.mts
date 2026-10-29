@@ -31,6 +31,9 @@ export function renderTemplate(
 ): string;
 export function tail(text: string | null | undefined, max?: number): string;
 export function extractJson(text: string | null | undefined): unknown;
+export function isReviewResult(
+  value: unknown,
+): value is { findings: Finding[] };
 export function splitFindings(
   findings: readonly Finding[] | null | undefined,
 ): {

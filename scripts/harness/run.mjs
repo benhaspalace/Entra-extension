@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import {
   appendLessons,
   extractJson,
+  isReviewResult,
   formatFinding,
   metricsLine,
   parseArgs,
@@ -126,10 +127,19 @@ function pickIssue() {
 }
 
 function setStatus(issue, add, comment) {
-  const remove = Object.values(config.labels.status).filter(
-    (label) => label !== add,
-  );
   if (options.dryRun) return log(`status #${issue} -> ${add}`);
+  // Drop agent:ready too, or --next would pick the same issue again. Only remove
+  // labels the issue has, so gh does not reject the edit.
+  const view = gh(['issue', 'view', String(issue), '--json', 'labels'], {
+    allowFail: true,
+  });
+  const current = new Set(
+    view.ok ? JSON.parse(view.stdout).labels.map((label) => label.name) : [],
+  );
+  const remove = [
+    config.labels.ready,
+    ...Object.values(config.labels.status),
+  ].filter((label) => label !== add && current.has(label));
   gh(
     [
       'issue',
@@ -247,19 +257,28 @@ try {
   // Stage everything so new files show up in the diff; the commit below stages again anyway.
   if (!options.dryRun) git(['add', '-A']);
   const diff = git(['diff', '--cached', base]).stdout;
-  const review = extractJson(
-    copilot(
-      'review',
-      models.review,
-      renderTemplate(template('review'), {
-        ...shared,
-        diff: tail(diff, 80000),
-      }),
-      { readOnly: true },
-    ),
-  );
-  const { fixNow, followUps, notes } = splitFindings(review?.findings);
-  for (const finding of review?.findings ?? [])
+  // A review that cannot be parsed must not count as "no findings": retry once, then stop.
+  let review = null;
+  for (let attempt = 1; attempt <= 2 && !isReviewResult(review); attempt++) {
+    review = extractJson(
+      copilot(
+        `review-${attempt}`,
+        models.review,
+        renderTemplate(template('review'), {
+          ...shared,
+          diff: tail(diff, 80000),
+        }),
+        { readOnly: true },
+      ),
+    );
+    if (options.dryRun) review = { findings: [] };
+  }
+  if (!isReviewResult(review))
+    throw new Error(
+      'Review agent did not return a valid {"findings": [...]} result; the change is unreviewed.',
+    );
+  const { fixNow, followUps, notes } = splitFindings(review.findings);
+  for (const finding of review.findings)
     if (finding?.severity in record.findingCounts)
       record.findingCounts[finding.severity]++;
 
@@ -293,7 +312,7 @@ try {
         run: JSON.stringify(
           {
             ...record,
-            reviewFindings: review?.findings ?? [],
+            reviewFindings: review.findings,
             gateFailures: record.gateFailures,
           },
           null,

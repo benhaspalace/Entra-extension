@@ -37,6 +37,7 @@ export function tail(text, max = 6000) {
 export function extractJson(text) {
   const fenced = [...(text ?? '').matchAll(/```json\s*([\s\S]*?)```/g)];
   const candidates = fenced.map((match) => match[1]).reverse();
+  if (text) candidates.push(text);
   const start = text?.lastIndexOf('\n{');
   if (start !== undefined && start >= 0) candidates.push(text.slice(start + 1));
   for (const candidate of candidates) {
@@ -47,6 +48,16 @@ export function extractJson(text) {
     }
   }
   return null;
+}
+
+/** A review result must be an object with a findings array, or the change counts as unreviewed. */
+export function isReviewResult(value) {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    Array.isArray(value.findings) &&
+    value.findings.every((finding) => finding && typeof finding === 'object')
+  );
 }
 
 /** In-scope high/medium findings are fixed now; out-of-scope ones become issues. */
