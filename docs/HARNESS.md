@@ -35,7 +35,13 @@ GitHub issue (agent:ready)
   └─ retrospective agent (read-only)             → lessons, promotions, harness issues
   └─ commit → push → PR "Closes #N" (agent:in-review)
      failure at any step → issue comment + agent:needs-human
+  └─ Codex review on the PR (GitHub app) + CI          → address comments, fix conflicts
 ```
+
+Every PR in this repo also gets an automatic **Codex review** (`chatgpt-codex-connector`).
+Treat its findings like the review agent's: verify each against the code, fix or reply, and
+record anything recurring in `.agents/LESSONS.md`. Stacked PRs need the base branch merged
+in whenever it moves, to keep them free of conflicts.
 
 ## Usage
 
