@@ -1,0 +1,35 @@
+:root {
+  color-scheme: light dark;
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+}
+main {
+  max-width: 720px;
+  margin: 32px auto;
+  padding: 16px;
+}
+form {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0;
+}
+input,
+button {
+  font: inherit;
+  padding: 8px;
+}
+input[type='checkbox'] {
+  width: auto;
+}
+code {
+  overflow-wrap: anywhere;
+}
+.error {
+  color: #a4262c;
+}
+@media (prefers-color-scheme: dark) {
+  .error {
+    color: #ffaaaa;
+  }
+}
