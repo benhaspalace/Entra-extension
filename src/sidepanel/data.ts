@@ -76,11 +76,18 @@ export async function loadMembership(
     };
   }
   const [profile, groups, assignments] = await Promise.all([
-    graph.graphFetch<DirectoryObject>(
-      `/users/${context.id}?$select=displayName,userPrincipalName`,
-      GROUP_SCOPE,
-      signal,
-    ),
+    // Reading another user's profile needs User.ReadBasic.All, which is not
+    // requested, so the name is optional and the title falls back to the id.
+    graph
+      .graphFetch<DirectoryObject>(
+        `/users/${context.id}?$select=displayName,userPrincipalName`,
+        GROUP_SCOPE,
+        signal,
+      )
+      .catch((error: unknown) => {
+        if (signal.aborted) throw error;
+        return null;
+      }),
     graph.list<Group>(
       `/users/${context.id}/memberOf/microsoft.graph.group?$select=${GROUP_SELECT}&$count=true`,
       GROUP_SCOPE,
@@ -92,7 +99,7 @@ export async function loadMembership(
       signal,
     ),
   ]);
-  const user: DirectoryObject = { ...profile, id: context.id };
+  const user: DirectoryObject = { ...(profile ?? {}), id: context.id };
   const targeted = assignments.map((assignment) => ({
     ...assignment,
     target: { objectId: context.id },
