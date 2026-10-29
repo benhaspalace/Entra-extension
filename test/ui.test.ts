@@ -51,7 +51,10 @@ async function setupPanel(signedIn = true, auditEnabled = true) {
         id,
         displayName: `${id}<img src=x onerror=alert(1)>`,
         resourceRoleScopes: [
-          { scope: { originId: GROUP, originSystem: 'AadGroup' } },
+          {
+            role: { displayName: 'Member' },
+            scope: { originId: GROUP, originSystem: 'AadGroup' },
+          },
         ],
       })),
     },

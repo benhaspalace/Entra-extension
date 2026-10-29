@@ -16,15 +16,22 @@ export interface AccessPackage {
   id: string;
   displayName: string;
   resourceRoleScopes?: {
-    scope?: { originId?: string; originSystem?: string };
+    role?: { originId?: string; displayName?: string };
+    scope?: { originId?: string; originSystem?: string; displayName?: string };
   }[];
+  'resourceRoleScopes@odata.nextLink'?: string;
 }
 
 export interface Assignment {
   id: string;
   state: string;
-  target?: { objectId?: string };
-  accessPackage?: { id: string; displayName?: string };
+  target?: { objectId?: string; displayName?: string };
+  accessPackage?: {
+    id: string;
+    displayName?: string;
+    catalog?: { displayName?: string };
+  };
+  assignmentPolicy?: { displayName?: string };
   schedule?: {
     startDateTime?: string;
     expiration?: {
@@ -33,6 +40,22 @@ export interface Assignment {
       duration?: string | null;
     };
   };
+}
+
+export interface PackageResource {
+  id: string;
+  name: string;
+  system: string;
+}
+
+export interface UserPackageAssignment extends Assignment {
+  resources: PackageResource[];
+}
+
+export interface UserAccessPackages {
+  userId: string;
+  displayName: string;
+  assignments: UserPackageAssignment[];
 }
 
 export interface DirectoryAudit {

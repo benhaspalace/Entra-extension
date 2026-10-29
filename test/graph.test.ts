@@ -155,6 +155,30 @@ describe('Graph paging and authentication', () => {
     expect(retryDelay('Wed, 30 Sep 2026 00:00:00 GMT', 0, now)).toBe(0);
   });
 
+  it('allows waits up to exactly 60 seconds and rejects longer numeric or date waits', () => {
+    const now = Date.parse('2026-10-01T00:00:00Z');
+    expect(retryDelay('60', 0, now)).toBe(60_000);
+    expect(retryDelay('Thu, 01 Oct 2026 00:01:00 GMT', 0, now)).toBe(60_000);
+    expect(() => retryDelay('60.001', 0, now)).toThrow('throttling');
+    expect(() => retryDelay('Thu, 01 Oct 2026 00:01:01 GMT', 0, now)).toThrow(
+      'throttling',
+    );
+  });
+
+  it.each([429, 503])(
+    'does not sleep or retry when %s requires more than 60 seconds',
+    async (status) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(json({}, status, { 'Retry-After': '61' }));
+      const sleep = vi.fn(async () => {});
+      await expect(
+        createGraphClient(async () => 't', fetcher, sleep).list('/groups', 's'),
+      ).rejects.toThrow('throttling');
+      expect(sleep).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
   it('sends advanced query headers for cast membership requests', async () => {
     const fetcher = vi
       .fn<typeof fetch>()

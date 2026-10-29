@@ -1,4 +1,4 @@
-# Setup (phase 1)
+# Setup
 
 The extension uses its **own** delegated Microsoft Graph sign-in. It never reads
 Entra portal tokens, cookies or storage. Supported browsers are desktop Microsoft
@@ -81,7 +81,8 @@ Open `https://entra.microsoft.com/`, navigate to either:
 
 Click the pinned extension toolbar action to open its side panel. Navigation is
 detected from the URL only (hash changes, history navigation and one-second
-polling). No portal DOM is inspected.
+polling). Membership detection does not inspect the portal DOM; only the user
+profile menu integration below reads the shell DOM.
 
 The panel lists **direct** memberships, with an All / Access package / Manual /
 Dynamic filter. Synced rows appear under All. Each package has its own portal link
@@ -102,6 +103,44 @@ and back in to discard the map immediately. Package role scopes are fetched as
 separate paged lists rather than relying on potentially truncated nested expands.
 All Graph calls use v1.0 and follow every `@odata.nextLink`.
 
+## 5. Use the user profile Access packages drawer
+
+Open any user profile section with a URL matching
+`#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/<section>/userId/<guid>`.
+In the left resource menu, choose **Access packages**, directly above
+**Custom security attributes**. Enter and Space also activate the item.
+
+The right-hand drawer lists assignments grouped into **Active** (`delivered`,
+`partiallyDelivered`, `delivering`) and **Expired / failed** (all other states).
+Each row shows a package link, catalog, policy, state, UTC start/expiry dates and
+the package's current resources; groups link to their Entra blades. Explicit
+non-expiring schedules show **No expiration**; duration-based schedules show the
+duration and start. Missing dates are shown as **Not provided**, not assumed to be
+non-expiring. Pending assignment requests are not included.
+
+The drawer gets data from the background worker, using the existing extension
+sign-in and the same session-scoped, 15-minute package/resource cache as the
+membership panel. It does not read portal credentials or call Graph itself.
+Its title uses the assignment target's display name, falling back to the user ID
+when no target name is returned (including an empty assignment list); no extra
+profile-read permission is requested. Package resources reflect the current
+cached configuration, not a historical snapshot of an expired assignment.
+
+Use **Refresh** to reload assignments (the resource cache still lasts up to
+15 minutes), **Close** or Escape to dismiss, and **Open in side panel** to access
+sign-in or the existing membership views. On an Overview section, the side panel
+asks you to navigate to **User > Groups** or **Group > Members**.
+No assignments shows **No access package assignments**; sign-in, permission and
+network failures are shown explicitly and can be retried with **Refresh**.
+
+The menu is cloned from a shell resource-menu item, without its navigation,
+selection state or listeners. It is reinserted after portal rerenders and removed
+when leaving the user profile; changing users also closes the drawer. The drawer
+is isolated in a closed Shadow DOM. If the anchor label cannot be found, nothing
+is injected and the existing side panel remains usable. Currently the label list
+in `src/content/menuLabels.ts` supports English; additional localized anchor labels
+can be added there.
+
 ## Troubleshooting and limits
 
 - **401 / expired session:** sign in again. The helper first attempts one token
@@ -114,7 +153,13 @@ All Graph calls use v1.0 and follow every `@odata.nextLink`.
 - **Redirect or token exchange error:** check the extension ID and exact **SPA**
   redirect URI in this browser/profile. Never work around this by adding a secret.
 - **No context:** use the exact Members/Groups blades above, not Overview or a
-  different Entra host. Encoded and double-encoded hash routes are supported.
+  different Entra host for the membership panel. The Access packages drawer works
+  on any matching user profile section. Encoded and double-encoded hash routes
+  are supported.
+- **Access packages item missing:** use the user profile blade on
+  `entra.microsoft.com` and check for the English **Custom security attributes**
+  anchor in the shell menu. A localized or changed portal menu is skipped safely.
+  Reload the portal after reloading the extension.
 - **Unknown audit attribution:** typical P1/P2 audit retention is 30 days (tenant
   policy/licensing may differ). Removed/re-added memberships and service actions
   mean the latest retained successful addition is historical evidence only.
@@ -143,3 +188,9 @@ Follow all package/member/group links, switch tabs and blades, try every filter,
 and verify manual attribution and the no-audit-permission case. Sign out and confirm
 the list clears; restart the browser and confirm sign-in is required again.
 Unit tests mock Graph and Chrome; they do not replace this tenant-backed check.
+On a user profile, check that **Access packages** appears once immediately above
+**Custom security attributes**, including after switching sections and portal menu
+rerenders. Open it with mouse, Enter and Space; verify active/expired assignments,
+catalog/policy/dates, resource links, empty state, signed-out and 403 errors, retry,
+side-panel opening, Close/Escape, and cleanup when switching users or leaving the
+profile. The menu fixtures use jsdom; a live portal check is still necessary.

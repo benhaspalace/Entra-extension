@@ -8,9 +8,17 @@ delivered access packages (including multiple package links and expiry), dynamic
 rules, AD sync, or manual membership with lazy audit-log attribution. Filter rows
 by governance source and open the relevant Entra blades from each row.
 
+On any **User profile** blade, an **Access packages** menu item appears directly
+above **Custom security attributes**. It opens an in-page drawer with active and
+expired/failed assignments, catalog, policy, dates and package resources, including
+group links. The drawer also offers **Open in side panel** for sign-in and the
+existing membership views. Pending requests are not included.
+
 The extension uses its own authorization code + PKCE sign-in and Microsoft Graph
-v1.0, not portal tokens or DOM scraping. Tenant/client settings sync through the
-browser; tokens and a 15-minute package map stay in session storage only.
+v1.0, never portal tokens. A top-frame content script inspects only the shell DOM
+to clone the menu item; the drawer uses a closed Shadow DOM, and its Graph work
+runs in the background worker. Tenant/client settings sync through the browser;
+tokens and a shared 15-minute package map stay in session storage only.
 
 ## Get started
 

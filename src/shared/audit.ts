@@ -64,7 +64,7 @@ export function matchAudit(
     when: event.activityDateTime,
     historicalPackage:
       !!app &&
-      (/^(Microsoft (Azure AD|Entra) )?(Entitlement Management|Identity Governance)$/i.test(
+      (/entitlement management|identity governance/i.test(
         app.displayName ?? '',
       ) ||
         app.appId?.toLowerCase() === '810dcf14-1858-4bf2-8134-4c369fa3235b'),

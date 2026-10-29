@@ -1,3 +1,5 @@
+import type { UserAccessPackages } from './types';
+
 export interface AuthStatus {
   signedIn: boolean;
   sessionId: string | null;
@@ -8,6 +10,8 @@ interface Requests {
   signOut: undefined;
   authStatus: undefined;
   getToken: { refresh: boolean };
+  getUserAccessPackages: { userId: string };
+  openSidePanel: undefined;
 }
 
 interface Results {
@@ -15,6 +19,8 @@ interface Results {
   signOut: AuthStatus;
   authStatus: AuthStatus;
   getToken: string;
+  getUserAccessPackages: UserAccessPackages;
+  openSidePanel: null;
 }
 
 export type Request = {

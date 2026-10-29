@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadMembership, mapLimited } from '../src/sidepanel/data';
+import { loadMembership } from '../src/sidepanel/data';
+import { mapLimited } from '../src/shared/packages';
 import { createGraphClient } from '../src/shared/graph';
 import { json, mockChrome } from './helpers';
 
@@ -16,13 +17,30 @@ describe('membership data orchestration', () => {
       const path = url.pathname;
       if (path.endsWith('/accessPackages')) {
         return json({
-          value: [{ id: 'p1', displayName: 'First package' }],
+          value: [
+            {
+              id: 'p1',
+              displayName: 'First package',
+              'resourceRoleScopes@odata.nextLink':
+                'https://graph.microsoft.com/v1.0/expanded-next',
+            },
+          ],
           '@odata.nextLink': 'https://graph.microsoft.com/v1.0/packages-next',
         });
       }
       if (path.endsWith('/packages-next'))
-        return json({ value: [{ id: 'p2', displayName: 'Second package' }] });
+        return json({
+          value: [
+            {
+              id: 'p2',
+              displayName: 'Second package',
+              'resourceRoleScopes@odata.nextLink':
+                'https://graph.microsoft.com/v1.0/expanded-next',
+            },
+          ],
+        });
       if (path.includes('/resourceRoleScopes')) {
+        expect(url.searchParams.get('$expand')).toBe('role,scope');
         return json({
           value: [],
           '@odata.nextLink': `https://graph.microsoft.com/v1.0/scopes-next?package=${path.split('/')[5]}`,
@@ -30,7 +48,12 @@ describe('membership data orchestration', () => {
       }
       if (path.endsWith('/scopes-next'))
         return json({
-          value: [{ scope: { originId: 'g', originSystem: 'AadGroup' } }],
+          value: [
+            {
+              role: { displayName: 'Member' },
+              scope: { originId: 'g', originSystem: 'AadGroup' },
+            },
+          ],
         });
       if (path.endsWith('/groups/g'))
         return json({ id: 'g', displayName: 'Group', groupTypes: [] });
@@ -42,6 +65,9 @@ describe('membership data orchestration', () => {
       if (path.endsWith('/members-next'))
         return json({ value: [{ id: 'u2' }] });
       if (path.endsWith('/assignments')) {
+        expect(url.searchParams.get('$filter')).toMatch(
+          /^(accessPackage\/id|target\/objectId) eq '[^']+'$/,
+        );
         const pkg = url.searchParams.get('$filter')?.includes("'p1'")
           ? 'p1'
           : 'p2';
@@ -55,7 +81,10 @@ describe('membership data orchestration', () => {
           value: [
             {
               id: `a-${url.searchParams.get('package')}`,
-              state: 'delivered',
+              state:
+                url.searchParams.get('package') === 'p1'
+                  ? 'partiallyDelivered'
+                  : 'delivering',
               target: { objectId: 'u1' },
             },
           ],
@@ -94,20 +123,35 @@ describe('membership data orchestration', () => {
           id: 'p1',
           displayName: 'Package 1',
           resourceRoleScopes: [
-            { scope: { originId: 'package-group', originSystem: 'AadGroup' } },
+            {
+              role: { displayName: 'Member' },
+              scope: { originId: 'package-group', originSystem: 'AadGroup' },
+            },
           ],
         },
         {
           id: 'p2',
           displayName: 'Package 2',
           resourceRoleScopes: [
-            { scope: { originId: 'package-group', originSystem: 'AadGroup' } },
+            {
+              role: { originId: 'Member_package-group' },
+              scope: { originId: 'package-group', originSystem: 'AadGroup' },
+            },
           ],
         },
       ],
     };
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
+      if (url.pathname.endsWith('/users/user')) {
+        expect(url.searchParams.get('$select')).toBe(
+          'displayName,userPrincipalName',
+        );
+        return json({
+          displayName: 'User name',
+          userPrincipalName: 'user@example.com',
+        });
+      }
       if (url.pathname.endsWith('/memberOf/microsoft.graph.group'))
         return json({
           value: [
@@ -131,9 +175,16 @@ describe('membership data orchestration', () => {
         expect(url.searchParams.get('$filter')).toContain(
           "target/objectId eq 'user'",
         );
+        expect(url.searchParams.get('$filter')).toMatch(
+          /^(accessPackage\/id|target\/objectId) eq '[^']+'$/,
+        );
         return json({
           value: [
-            { id: 'a1', state: 'delivered', accessPackage: { id: 'p1' } },
+            {
+              id: 'a1',
+              state: 'partiallyDelivered',
+              accessPackage: { id: 'p1' },
+            },
           ],
           '@odata.nextLink': 'https://graph.microsoft.com/v1.0/assignment-next',
         });
@@ -141,7 +192,7 @@ describe('membership data orchestration', () => {
       if (url.pathname.endsWith('/assignment-next'))
         return json({
           value: [
-            { id: 'a2', state: 'delivered', accessPackage: { id: 'p2' } },
+            { id: 'a2', state: 'delivering', accessPackage: { id: 'p2' } },
           ],
         });
       throw new Error(`Unexpected test URL: ${url.href}`);
@@ -152,6 +203,12 @@ describe('membership data orchestration', () => {
       'account',
       new AbortController().signal,
     );
+    expect(data.title).toBe('User name - Groups');
+    expect(data.rows[0]?.member).toMatchObject({
+      id: 'user',
+      displayName: 'User name',
+      userPrincipalName: 'user@example.com',
+    });
     expect(data.rows.map((row) => row.governance.source)).toEqual([
       'access-package',
       'dynamic',

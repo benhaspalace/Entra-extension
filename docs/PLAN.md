@@ -7,12 +7,12 @@ Microsoft Entra admin center (`https://entra.microsoft.com/`).
 
 For every member of a group, show how the membership is governed:
 
-| Source | How we detect it | What we show |
-|---|---|---|
-| **Access package** | A *delivered* `accessPackageAssignment` whose access package contains the group as a resource (`resourceRoleScopes[].scope.originId == groupId`, `originSystem == 'AadGroup'`) and whose `target.objectId == memberId` | Badge "Access package" + one hyperlink per package (a member may hold several), plus assignment expiry if any |
-| **Dynamic rule** | `group.groupTypes` contains `DynamicMembership` | Badge "Dynamic" + the membership rule |
-| **Synced from on-prem AD** | `group.onPremisesSyncEnabled == true` | Badge "Synced (AD)" |
-| **Manual** | None of the above | Badge "Manual" + *who* added it and *when*, from the directory audit log (`Add member to group`), if still within audit retention (30 days on P1/P2); otherwise "added by: unknown (older than audit retention)" |
+| Source                     | How we detect it                                                                                                                                                                                                                                                                                                                                                                                      | What we show                                                                                                                                                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Access package**         | An active (`delivered`, `partiallyDelivered`, or `delivering`) `accessPackageAssignment` whose access package grants the group's **Member** role (`resourceRoleScopes[].scope.originId == groupId`, `originSystem == 'AadGroup'`, and `role.originId` starts with `Member_` or `role.displayName == 'Member'`) and whose `target.objectId == memberId`. Owner-only packages do not govern membership. | Badge "Access package" + one hyperlink per package (a member may hold several), plus assignment expiry if any                                                                                                    |
+| **Dynamic rule**           | `group.groupTypes` contains `DynamicMembership`                                                                                                                                                                                                                                                                                                                                                       | Badge "Dynamic" + the membership rule                                                                                                                                                                            |
+| **Synced from on-prem AD** | `group.onPremisesSyncEnabled == true`                                                                                                                                                                                                                                                                                                                                                                 | Badge "Synced (AD)"                                                                                                                                                                                              |
+| **Manual**                 | None of the above                                                                                                                                                                                                                                                                                                                                                                                     | Badge "Manual" + _who_ added it and _when_, from the directory audit log (`Add member to group`), if still within audit retention (30 days on P1/P2); otherwise "added by: unknown (older than audit retention)" |
 
 A member can be both access-package governed **and** manually added (e.g. added by
 hand before the package existed). Access package always wins as the primary label; the
@@ -31,23 +31,27 @@ On the user profile blade
 (`#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/<anything>/userId/<guid>`)
 inject a menu entry **"Access packages"** directly **above "Custom security attributes"**
 in the left resource menu (Overview, Audit logs, Sign-in logs, Diagnose and solve
-problems, *Access packages*, Custom security attributes, Assigned roles, …).
+problems, _Access packages_, Custom security attributes, Assigned roles, …).
 
 Injection (content script, top frame only — the resource menu is rendered in the shell
 document, not in a blade iframe):
 
 - `MutationObserver` on `document.body` (the portal is an SPA and re-renders the menu on
-  every blade navigation); debounce; only active while the URL matches the user profile blade.
+  every blade navigation); throttle to at most one run every 250 ms, observing child-list
+  changes only (not character data); only active while the URL matches the user profile blade.
 - Locate the anchor item: the menu element whose trimmed text is exactly
   `Custom security attributes` (label list in `src/content/menuLabels.ts` so localized
-  labels can be added). Climb to the item container
+  labels can be added), using a TreeWalker over text nodes. Climb to the item container
   (`closest('[role="listitem"], [role="treeitem"], [role="menuitem"], li')`).
+  Choose the last visible match (`getClientRects().length > 0`), skipping hidden blades;
+  fall back to the last match only if document layout is unavailable.
 - Clone the container (`cloneNode(true)` — listeners are not cloned), replace the label
   text and icon (inline SVG, no external fetch), strip `id`s / `aria-selected` /
   selected-state classes, mark it with `data-entra-helper="access-packages"`, insert before
   the anchor. Idempotent: never insert twice; re-insert if the portal re-renders the menu.
 - If the anchor cannot be found, inject nothing (the side panel still works).
 - Keyboard accessible: `tabindex=0`, Enter/Space activate.
+- Ignore untrusted click/keydown events on the injected menu item.
 
 On click: open an **in-page drawer** (fixed-position panel on the right, rendered in a
 closed Shadow DOM so portal CSS cannot leak in either direction) titled
@@ -89,7 +93,7 @@ first-party apps and live in other origins' storage). It signs in on its own:
 
 - OAuth 2.0 authorization code flow + PKCE via `chrome.identity.launchWebAuthFlow`.
 - Requires an **app registration** in the tenant (documented in `docs/SETUP.md`):
-  - Platform: *Single-page application*, redirect URI `https://<extension-id>.chromiumapp.org/`
+  - Platform: _Single-page application_, redirect URI `https://<extension-id>.chromiumapp.org/`
   - Delegated Graph permissions: `User.Read`, `GroupMember.Read.All`,
     `EntitlementManagement.Read.All`, `AuditLog.Read.All` (audit is optional — the feature
     degrades gracefully without it), admin consent granted.
@@ -104,25 +108,33 @@ first-party apps and live in other origins' storage). It signs in on its own:
 1. `GET /groups/{id}?$select=id,displayName,groupTypes,membershipRule,onPremisesSyncEnabled`
 2. `GET /groups/{id}/members?$select=id,displayName,userPrincipalName,mail&$top=999` (paged)
 3. Access packages containing the group:
-   - `GET /identityGovernance/entitlementManagement/accessPackages?$expand=resourceRoleScopes($expand=scope)&$select=id,displayName,catalog`
+   - `GET /identityGovernance/entitlementManagement/accessPackages?$expand=resourceRoleScopes($expand=role,scope)&$select=id,displayName`
      (paged; cached in `chrome.storage.session` for 15 min, since it is tenant-wide),
-     keep those with a scope where `originId == groupId`.
+     keep those with an AadGroup scope where `originId == groupId` and the Member role.
+     Only if an expanded collection carries `resourceRoleScopes@odata.nextLink`, reload
+     that package's complete collection through the paged
+     `GET .../accessPackages/{id}/resourceRoleScopes?$expand=role,scope` list.
+     Cache-write failures are reported but do not discard successfully fetched data.
 4. For each matching package:
-   `GET /identityGovernance/entitlementManagement/assignments?$filter=accessPackage/id eq '{pkg}' and state eq 'delivered'&$expand=target&$select=id,state,schedule`
+   `GET /identityGovernance/entitlementManagement/assignments?$filter=accessPackage/id eq '{pkg}' and (state eq 'delivered' or state eq 'partiallyDelivered' or state eq 'delivering')&$expand=target&$select=id,state,schedule`
    → map `target.objectId` → list of packages.
 5. Manual members (lazy, concurrency-limited to 4, plus a "Look up" button per row):
    `GET /auditLogs/directoryAudits?$filter=activityDisplayName eq 'Add member to group' and targetResources/any(t:t/id eq '{memberId}')&$orderby=activityDateTime desc&$top=50`
    then match the group id client-side (`targetResources[].id` or the `Group.ObjectID`
    modified property). Actor = `initiatedBy.user.userPrincipalName` or
    `initiatedBy.app.displayName`. If the actor app is the identity governance service,
-   label it "Access package (historical)".
+   label it "Access package (historical)" (case-insensitive app-name substring
+   `entitlement management` or `identity governance`, or the known service app ID).
 
-For the **User → Groups** view: `GET /users/{id}/memberOf/microsoft.graph.group?$select=...`,
-`GET .../assignments?$filter=target/objectId eq '{userId}' and state eq 'delivered'&$expand=accessPackage`
+For the **User → Groups** view: fetch the title using
+`GET /users/{id}?$select=displayName,userPrincipalName`,
+`GET /users/{id}/memberOf/microsoft.graph.group?$select=...`,
+`GET .../assignments?$filter=target/objectId eq '{userId}' and (state eq 'delivered' or state eq 'partiallyDelivered' or state eq 'delivering')&$expand=accessPackage`
 and the cached package→group map from (3).
 
 All calls go through one `graphFetch` helper: auth header, `@odata.nextLink` paging,
-429/503 retry honouring `Retry-After`, typed errors (401 → re-auth, 403 → "missing
+429/503 retry honouring `Retry-After` up to 60 seconds (longer waits throw a throttling
+error instead of sleeping), typed errors (401 → re-auth, 403 → "missing
 permission/role" message naming the scope).
 
 ## Hyperlinks

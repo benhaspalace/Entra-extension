@@ -121,8 +121,24 @@ describe('audit matching', () => {
         'group',
         'member',
       )?.historicalPackage,
-    ).toBe(false);
+    ).toBe(true);
   });
+  it.each([
+    ['Service - IDENTITY GOVERNANCE (tenant)', true],
+    ['Custom eNtItLeMeNt MaNaGeMeNt tool', true],
+    ['Group management automation', false],
+  ])(
+    'matches historical service names by case-insensitive substring: %s',
+    (displayName, historicalPackage) => {
+      expect(
+        matchAudit(
+          [{ ...event, initiatedBy: { app: { displayName } } }],
+          'group',
+          'member',
+        )?.historicalPackage,
+      ).toBe(historicalPackage);
+    },
+  );
   it('handles missing actor and empty retention results', () => {
     expect(
       matchAudit([{ ...event, initiatedBy: {} }], 'group', 'member')?.actor,

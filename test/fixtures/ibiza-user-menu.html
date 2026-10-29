@@ -1,0 +1,37 @@
+<nav class="fxs-blade-resource-navigation" aria-label="User navigation">
+  <ul role="tree">
+    <li role="treeitem" class="fxs-blade-resource-navigation-list-item">
+      <a href="#overview"><span>Overview</span></a>
+    </li>
+    <li
+      id="custom-item"
+      role="treeitem"
+      aria-selected="true"
+      class="fxs-blade-resource-navigation-list-item fxs-is-selected"
+    >
+      <a
+        id="custom-link"
+        class="fxs-blade-resource-navigation-list-item-link is-active"
+        href="#custom-security-attributes"
+        tabindex="0"
+        aria-current="page"
+        aria-controls="blade-42"
+        data-bind="click: navigate"
+        onclick="portalNavigate()"
+      >
+        <span
+          class="fxs-blade-resource-navigation-list-item-icon"
+          aria-hidden="true"
+        >
+          <svg id="custom-icon"><use href="#portal-icon"></use></svg>
+        </span>
+        <span class="fxs-blade-resource-navigation-list-item-text">
+          <span id="custom-label"> Custom security attributes </span>
+        </span>
+      </a>
+    </li>
+    <li role="treeitem" class="fxs-blade-resource-navigation-list-item">
+      <a href="#roles"><span>Assigned roles</span></a>
+    </li>
+  </ul>
+</nav>

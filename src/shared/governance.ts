@@ -18,14 +18,27 @@ export type Governance =
 const sameId = (left: string | undefined, right: string) =>
   left?.toLowerCase() === right.toLowerCase();
 
+export const ACTIVE_ASSIGNMENT_STATES = [
+  'delivered',
+  'partiallyDelivered',
+  'delivering',
+] as const;
+
+export function isActiveAssignment(state: string): boolean {
+  return ACTIVE_ASSIGNMENT_STATES.some((active) => active === state);
+}
+
 export function packageContainsGroup(
   pkg: AccessPackage,
   groupId: string,
 ): boolean {
   return (
     pkg.resourceRoleScopes?.some(
-      ({ scope }) =>
-        scope?.originSystem === 'AadGroup' && sameId(scope.originId, groupId),
+      ({ role, scope }) =>
+        scope?.originSystem === 'AadGroup' &&
+        sameId(scope.originId, groupId) &&
+        (role?.originId?.startsWith('Member_') === true ||
+          role?.displayName === 'Member'),
     ) ?? false
   );
 }
@@ -41,7 +54,7 @@ export function classifyGovernance(
     if (!packageContainsGroup(pkg, group.id)) continue;
     for (const assignment of assignments) {
       if (
-        assignment.state !== 'delivered' ||
+        !isActiveAssignment(assignment.state) ||
         !sameId(assignment.target?.objectId, memberId) ||
         !sameId(assignment.accessPackage?.id, pkg.id)
       )

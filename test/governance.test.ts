@@ -14,7 +14,10 @@ const pkg: AccessPackage = {
   id: 'package',
   displayName: 'Engineering',
   resourceRoleScopes: [
-    { scope: { originId: 'GROUP', originSystem: 'AadGroup' } },
+    {
+      role: { originId: 'Member_GROUP' },
+      scope: { originId: 'GROUP', originSystem: 'AadGroup' },
+    },
   ],
 };
 const assignment: Assignment = {
@@ -45,6 +48,27 @@ describe('pure membership governance', () => {
         'group',
       ),
     ).toBe(false);
+  });
+
+  it.each([
+    [{ originId: 'Member_group' }, true],
+    [{ displayName: 'Member' }, true],
+    [{ originId: 'Owner_group', displayName: 'Owner' }, false],
+    [undefined, false],
+  ])('only the Member role governs membership: %o', (role, expected) => {
+    const candidate: AccessPackage = {
+      ...pkg,
+      resourceRoleScopes: [
+        {
+          ...(role ? { role } : {}),
+          scope: { originId: 'group', originSystem: 'AadGroup' },
+        },
+      ],
+    };
+    expect(packageContainsGroup(candidate, 'group')).toBe(expected);
+    expect(
+      classifyGovernance(group, 'member', [candidate], [assignment]).source,
+    ).toBe(expected ? 'access-package' : 'manual');
   });
 
   it('keeps multiple package hyperlinks and expiry; packages win over rule/sync', () => {
@@ -85,8 +109,8 @@ describe('pure membership governance', () => {
     });
   });
 
-  it.each(['expired', 'partiallyDelivered', 'delivering', 'deliveryFailed'])(
-    'does not classify %s assignments as delivered',
+  it.each(['expired', 'deliveryFailed', 'unknownFutureState'])(
+    'does not classify %s assignments as active',
     (state) => {
       expect(
         classifyGovernance(group, 'member', [pkg], [{ ...assignment, state }]),
@@ -94,6 +118,15 @@ describe('pure membership governance', () => {
     },
   );
 
+  it.each(['delivered', 'partiallyDelivered', 'delivering'])(
+    'classifies %s assignments as active',
+    (state) => {
+      expect(
+        classifyGovernance(group, 'member', [pkg], [{ ...assignment, state }])
+          .source,
+      ).toBe('access-package');
+    },
+  );
   it('does not use another member, package or group assignment', () => {
     expect(classifyGovernance(group, 'someone', [pkg], [assignment])).toEqual({
       source: 'manual',

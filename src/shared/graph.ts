@@ -40,13 +40,20 @@ export function retryDelay(
   attempt: number,
   now = Date.now(),
 ): number {
+  let delay = Math.min(1000 * 2 ** attempt, 30_000);
   if (value) {
     const seconds = Number(value);
-    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
-    const date = Date.parse(value);
-    if (Number.isFinite(date)) return Math.max(0, date - now);
+    if (Number.isFinite(seconds) && seconds >= 0) delay = seconds * 1000;
+    else {
+      const date = Date.parse(value);
+      if (Number.isFinite(date)) delay = Math.max(0, date - now);
+    }
   }
-  return Math.min(1000 * 2 ** attempt, 30_000);
+  if (delay > 60_000)
+    throw new Error(
+      'Microsoft Graph throttling requires a wait longer than 60 seconds. Try again later.',
+    );
+  return delay;
 }
 
 export interface GraphClient {
