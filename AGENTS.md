@@ -28,4 +28,16 @@ architecture (side panel + own PKCE sign-in + Graph v1.0) without saying so.
 - `npm run lint`
 - `npm run typecheck`
 
-All four must pass before you finish.
+All four must pass before you finish (`npm run verify` runs them all).
+
+## Workflow
+
+- Work comes from GitHub Issues labelled `agent:ready`. Keep a change scoped to its issue;
+  report unrelated problems instead of fixing them (they become new issues).
+- Read `.agents/LESSONS.md` before starting: mistakes earlier agents made here.
+- The harness (`npm run agent -- <issue>`, see `docs/HARNESS.md`) runs implement → gate →
+  independent review → fix → gate → PR → retrospective.
+
+## Learned rules
+
+Promoted from `.agents/LESSONS.md` after recurring in runs. Keep each rule short and checkable.

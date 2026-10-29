@@ -12,7 +12,10 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "verify": "npm run build && npm test && npm run lint && npm run typecheck",
+    "agent": "node scripts/harness/run.mjs",
+    "agent:labels": "node scripts/harness/setup-labels.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
