@@ -14,6 +14,11 @@ import { runAgent } from './agent.mjs';
 import { loadConfig, resolveModel } from './config.mjs';
 import { run, gh, git } from './process.mjs';
 import {
+  approvalDigest,
+  createIssueSnapshot,
+  isTrustedApproval,
+} from './issue-input.mjs';
+import {
   appendLessons,
   extractJson,
   isReviewResult,
@@ -165,10 +170,46 @@ const issue = JSON.parse(
     'view',
     String(issueNumber),
     '--json',
-    'number,title,body,labels,comments,url',
+    'number,title,body,labels,url',
   ]).stdout,
 );
-log(`issue #${issue.number}: ${issue.title}`);
+const comments = JSON.parse(
+  gh([
+    'api',
+    '--paginate',
+    '--slurp',
+    `repos/{owner}/{repo}/issues/${issue.number}/comments?per_page=100`,
+  ]).stdout,
+).flat();
+const snapshot = createIssueSnapshot(issue, comments);
+const snapshotPath = bodyFile(`issue-${issue.number}-input.json`, snapshot.text);
+log(`issue #${issue.number} input: ${snapshotPath}`);
+log(`Required approval: agent:approve sha256:${snapshot.digest}`);
+
+if (!options.dryRun) {
+  let approved = false;
+  for (const comment of comments) {
+    if (
+      approvalDigest(comment) !== snapshot.digest ||
+      comment.user?.type !== 'User'
+    )
+      continue;
+    const permission = JSON.parse(
+      gh([
+        'api',
+        `repos/{owner}/{repo}/collaborators/${encodeURIComponent(comment.user.login)}/permission`,
+      ]).stdout,
+    ).permission;
+    if (isTrustedApproval(comment, snapshot.digest, permission)) {
+      approved = true;
+      break;
+    }
+  }
+  if (!approved)
+    throw new Error(
+      'Issue input is not approved. Review the saved snapshot, then have a human with repository write access post the exact approval above. Labels alone do not authorize execution.',
+    );
+}
 
 if (!options.dryRun && git(['status', '--porcelain']).stdout.trim())
   throw new Error(
@@ -191,13 +232,8 @@ const record = {
   outcome: 'unknown',
 };
 
-const issueText = `# #${issue.number} ${issue.title}\n\n${issue.body}\n\n${(
-  issue.comments ?? []
-)
-  .map((comment) => `> ${comment.author?.login}: ${comment.body}`)
-  .join('\n\n')}`;
 const shared = {
-  issue: issueText,
+  issue: `Issue input snapshot (sha256:${snapshot.digest}):\n\n${snapshot.text}`,
   lessons: read(join(AGENTS_DIR, 'LESSONS.md')),
   gate: config.gate.join(' && '),
 };

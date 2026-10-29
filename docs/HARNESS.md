@@ -26,7 +26,7 @@ long-running and self-improving coding agents:
 ## The loop
 
 ```
-GitHub issue (agent:ready)
+GitHub issue (agent:ready + human approval of exact input digest)
   └─ implementation agent (agent CLI, write)    ← AGENTS.md + LESSONS.md + issue
        └─ gate ── fail → fix agent with gate output (up to maxAttempts)
   └─ review agent (different model, read-only)   → JSON findings
@@ -57,16 +57,36 @@ Then create the workflow labels:
 npm run agent:labels
 ```
 
-Then file an issue with the **Agent task** form (it gets `agent:ready`) and run, from a
-clean working tree:
+Then file an issue with the **Agent task** form (it gets `triage`). From a clean working
+tree, save a preview of the complete issue input:
+
+```bash
+npm run agent -- 12 --dry-run
+```
+
+Review `.agents/tmp/issue-12-input.json` in full, including every comment. The harness
+prints `agent:approve sha256:<digest>` for those exact bytes. A human with current
+repository write, maintain, or admin access must post that exact single-line comment
+on the issue, then apply `agent:ready` for automatic selection. Run:
 
 ```bash
 npm run agent -- 12
 ```
 
-To take the oldest `agent:ready` issue instead, use `npm run agent -- --next`. To check the
-wiring without calling models or changing GitHub, add `--dry-run`. To override the models
-for one run, use `--impl-model <id>` and `--review-model <id>`. Model defaults live only
+To take the oldest `agent:ready` issue instead, use `npm run agent -- --next`. The label
+alone never authorizes execution, including when an issue number is supplied explicitly.
+The harness fetches all comment pages, hashes the issue URL, number, title, body, and
+comment IDs/authors/bodies, and verifies a matching approval author's current repository
+permission before switching branches, changing labels, or invoking any agent. Bots and
+read/triage-only users cannot approve. Standalone approval commands are control metadata,
+not prompt content; all other comments are part of the snapshot. Edits, additions, or
+deletions invalidate approval if they change the snapshot. Agents receive the frozen
+snapshot from that fetch, not a later refetch of mutable issue text. An unapproved
+`--next` candidate stops the run rather than being silently skipped.
+
+Dry runs can preview unapproved input without calling models or changing GitHub.
+To override the models for one run, use `--impl-model <id>` and `--review-model <id>`.
+Model defaults live only
 in the ignored local file; `.agents/harness.config.json` keeps tasks, gate commands,
 retry limits, and labels.
 
@@ -80,6 +100,22 @@ validated. Model IDs must contain only letters, digits, dots, underscores, or
 hyphens. Requirements: `gh` signed in to the repo's GitHub host and the agent CLI signed in.
 All review authors' threads remain eligible; the configured bot login does not filter
 out human reviews.
+
+### Execution trust boundary
+
+Approval is a human trust decision, not a prompt-injection detector or sandbox. Never
+approve a digest without reviewing the exact saved snapshot, and do not approve
+instructions that ask an agent to retrieve additional unreviewed issue text. Untrusted
+issue authors and commenters cannot authorize execution merely by applying labels,
+claiming to be a maintainer in their text, or copying another snapshot's approval.
+
+The shared runner still executes write agents with host tool access. It does **not**
+provide secret isolation or network confinement. Run it only in a disposable,
+secretless environment with independently enforced network restrictions; do not expose
+maintainer credentials or unrelated workspaces to the write agent. Authentication for
+the agent service and the orchestrator's GitHub operations must be handled by the
+environment without granting the write agent reusable maintainer credentials.
+Do not treat passing gates or later PR review as protection against tool execution.
 
 ### Script-first orchestration and model routing
 
@@ -168,11 +204,11 @@ threads on PR #9 remain resolved.
 
 | Label                 | Meaning                                                               |
 | --------------------- | --------------------------------------------------------------------- |
-| `agent:ready`         | Can be picked up                                                      |
+| `agent:ready`         | Selection candidate; matching human snapshot approval also required   |
 | `agent:in-progress`   | Harness is running                                                    |
 | `agent:in-review`     | PR open, waiting for a human                                          |
 | `agent:needs-human`   | Harness stopped; see the issue comment and the `agent/issue-N` branch |
-| `triage`              | Filed by an agent; accept (relabel `agent:ready`) or close            |
+| `triage`              | New task or follow-up; review and approve its snapshot, or close       |
 | `source:agent-review` | Out-of-scope defect found by the review agent                         |
 | `harness`             | Improvement to the harness itself                                     |
 | `needs-tenant-test`   | Only verifiable in a live Entra tenant                                |

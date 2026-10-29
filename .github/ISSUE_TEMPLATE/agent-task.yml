@@ -1,6 +1,6 @@
 name: Agent task
 description: Work item an implementation agent can pick up.
-labels: ["agent:ready"]
+labels: ["triage"]
 body:
   - type: textarea
     id: goal
