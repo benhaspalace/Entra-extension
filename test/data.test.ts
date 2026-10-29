@@ -225,6 +225,32 @@ describe('membership data orchestration', () => {
     ).toBe(false);
   });
 
+  it('falls back to the user id when the profile read is forbidden', async () => {
+    const chrome = mockChrome();
+    chrome.session.values.packageCache = {
+      sessionId: 'account',
+      expiresAt: Date.now() + 60_000,
+      packages: [],
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/users/user'))
+        return json({ error: { code: 'Authorization_RequestDenied' } }, 403);
+      if (url.pathname.endsWith('/memberOf/microsoft.graph.group'))
+        return json({ value: [{ id: 'manual' }] });
+      if (url.pathname.endsWith('/assignments')) return json({ value: [] });
+      throw new Error(`Unexpected test URL: ${url.href}`);
+    });
+    const data = await loadMembership(
+      { kind: 'user', id: 'user' },
+      createGraphClient(async () => 'token', fetcher),
+      'account',
+      new AbortController().signal,
+    );
+    expect(data.title).toBe('user - Groups');
+    expect(data.rows.map((row) => row.governance.source)).toEqual(['manual']);
+  });
+
   it.each([
     ['other-account', Date.now() + 60_000],
     ['account', 0],
