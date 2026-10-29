@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Entra Admin Helper",
+  "version": "0.1.0",
+  "description": "Explain direct group membership using access packages, rules and audit history.",
+  "minimum_chrome_version": "116",
+  "permissions": ["identity", "storage", "sidePanel", "tabs"],
+  "host_permissions": [
+    "https://graph.microsoft.com/*",
+    "https://login.microsoftonline.com/*"
+  ],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://entra.microsoft.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": { "default_path": "sidepanel/index.html" },
+  "options_page": "options/index.html",
+  "action": { "default_title": "Open Entra Admin Helper" },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src https://graph.microsoft.com https://login.microsoftonline.com"
+  }
+}

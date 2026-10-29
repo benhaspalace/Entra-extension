@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Entra Admin Helper Options</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Entra Admin Helper Options</h1>
+      <p>
+        Use a single-tenant SPA app registration with delegated Microsoft Graph
+        permissions and admin consent. No client secret is needed or accepted.
+      </p>
+      <p>Register this exact SPA redirect URI:</p>
+      <code id="redirect"></code>
+      <form id="settings">
+        <label for="tenant">Directory (tenant) ID</label>
+        <input id="tenant" required autocomplete="off" spellcheck="false" />
+        <label for="client">Application (client) ID</label>
+        <input id="client" required autocomplete="off" spellcheck="false" />
+        <label class="checkbox">
+          <input id="audit" type="checkbox" checked />
+          Request AuditLog.Read.All for optional audit history
+        </label>
+        <button type="submit">Save settings</button>
+        <button id="test" type="button">Save and test sign-in</button>
+        <button id="signout" type="button">Sign out / clear session</button>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p>
+        Tenant/client settings sync with your browser profile. Tokens and cached
+        package data are stored only in memory-backed extension session storage.
+        Saving changed settings clears the current session.
+      </p>
+    </main>
+    <script src="options.js" defer></script>
+  </body>
+</html>
