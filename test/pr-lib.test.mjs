@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fixture from './fixtures/review-threads.json';
 import {
+  createReviewSnapshot,
   formatReply,
   isAddressResult,
   parseAddressResult,
@@ -43,6 +44,43 @@ describe('agent model routing', () => {
 });
 
 describe('PR pure helpers', () => {
+  it('binds review approval to the repository, PR, head and exact thread snapshot', () => {
+    const repo = { name: 'repo', owner: { login: 'owner' } };
+    const head = { headRefName: 'feature', headRefOid: 'abc123' };
+    const threads = shapeThreads(fixture);
+    const input = createReviewSnapshot(repo, 9, head, threads);
+    expect(input.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.parse(input.text)).toEqual({
+      version: 1,
+      repository: 'owner/repo',
+      pr: 9,
+      head: { branch: 'feature', sha: 'abc123' },
+      threads,
+    });
+    expect(createReviewSnapshot(repo, 9, head, threads)).toEqual(input);
+    for (const changed of [
+      [],
+      threads.slice(1),
+      [...threads, { ...threads[0], commentId: 999 }],
+      ...['threadId', 'commentId', 'author', 'path', 'line', 'body'].map(
+        (field) => [{ ...threads[0], [field]: 'changed' }, threads[1]],
+      ),
+    ])
+      expect(createReviewSnapshot(repo, 9, head, changed).digest).not.toBe(
+        input.digest,
+      );
+    for (const [otherRepo, pr, otherHead] of [
+      [{ ...repo, name: 'other' }, 9, head],
+      [{ ...repo, owner: { login: 'other' } }, 9, head],
+      [repo, 10, head],
+      [repo, 9, { ...head, headRefName: 'other' }],
+      [repo, 9, { ...head, headRefOid: 'new-head' }],
+    ])
+      expect(
+        createReviewSnapshot(otherRepo, pr, otherHead, threads).digest,
+      ).not.toBe(input.digest);
+  });
+
   it('shapes unresolved GraphQL review threads and preserves unavailable metadata', () => {
     expect(shapeThreads(fixture)).toEqual([
       {

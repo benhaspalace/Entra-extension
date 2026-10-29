@@ -1,7 +1,12 @@
 import { runAgent } from '../harness/agent.mjs';
-import { git, run } from '../harness/process.mjs';
+import { git } from '../harness/process.mjs';
 import { tail } from '../harness/lib.mjs';
-import { assertClean, redactEnvironmentPaths } from '../harness/terms.mjs';
+import {
+  assertClean,
+  checkFiles,
+  redactEnvironmentPaths,
+} from '../harness/terms.mjs';
+import { verifyInSandbox } from './sandbox.mjs';
 
 export const AGENT_RULES = `Read AGENTS.md, docs/PLAN.md, and .agents/LESSONS.md first.
 Keep changes scoped, add or adjust tests for changed behavior.
@@ -37,12 +42,10 @@ export function agent(options) {
 }
 
 export function verify() {
-  const result = run('npm', ['run', 'verify'], {
-    allowFail: true,
-    shell: true,
-  });
+  const result = verifyInSandbox();
   const output = redactEnvironmentPaths(result.output);
   assertClean('Quality gate output', output);
+  if (result.ok) checkFiles(git);
   return { ...result, stdout: redactEnvironmentPaths(result.stdout), output };
 }
 

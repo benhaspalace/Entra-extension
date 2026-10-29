@@ -1,4 +1,23 @@
+import { createHash } from 'node:crypto';
 import { extractJson } from '../harness/lib.mjs';
+
+export function createReviewSnapshot(repo, pr, head, threads) {
+  const text = JSON.stringify(
+    {
+      version: 1,
+      repository: `${repo.owner.login}/${repo.name}`,
+      pr,
+      head: { branch: head.headRefName, sha: head.headRefOid },
+      threads,
+    },
+    null,
+    2,
+  );
+  return {
+    text,
+    digest: createHash('sha256').update(text, 'utf8').digest('hex'),
+  };
+}
 
 export function formatReply(message) {
   if (typeof message !== 'string' || !message.trim())

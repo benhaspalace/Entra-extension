@@ -1,9 +1,20 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { gh, git } from '../harness/process.mjs';
 import { runAgent } from '../harness/agent.mjs';
-import { fetchThreads, replyToThread, repository } from './github.mjs';
-import { parseAddressResult, parsePrArgs } from './lib.mjs';
+import {
+  fetchThreads,
+  replyToThread,
+  repository,
+  requireReviewApproval,
+} from './github.mjs';
+import {
+  createReviewSnapshot,
+  parseAddressResult,
+  parsePrArgs,
+} from './lib.mjs';
 import { assertClean } from '../harness/terms.mjs';
 import {
   AGENT_RULES,
@@ -30,7 +41,20 @@ export function address(pr, dryRun = false) {
     throw new Error(
       'Fork PRs are not supported; use a same-repository head branch.',
     );
+  const threads = fetchThreads(pr, repo);
+  if (!threads.length) {
+    console.log('No unresolved review threads.');
+    return;
+  }
+  const input = createReviewSnapshot(repo, pr, head, threads);
+  const directory = join('.agents', 'tmp');
+  mkdirSync(directory, { recursive: true });
+  const inputPath = join(directory, `pr-${pr}-input.json`);
+  writeFileSync(inputPath, input.text);
+  console.log(`Review input: ${inputPath}`);
+  console.log(`Required approval: agent:approve sha256:${input.digest}`);
   if (!dryRun) {
+    requireReviewApproval(pr, repo, input.digest);
     gh(['pr', 'checkout', String(pr)]);
     requireClean();
     const checkedOut = snapshot();
@@ -39,11 +63,6 @@ export function address(pr, dryRun = false) {
       checkedOut.head !== head.headRefOid
     )
       throw new Error('Checked-out branch does not match the PR head.');
-  }
-  const threads = fetchThreads(pr, repo);
-  if (!threads.length) {
-    console.log('No unresolved review threads.');
-    return;
   }
   const prompt = `${AGENT_RULES}
 Verify each review comment against the code; fix valid findings and decline incorrect ones with a reason.

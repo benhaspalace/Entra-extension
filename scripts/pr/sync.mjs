@@ -50,7 +50,7 @@ Conflicted files: ${JSON.stringify(conflicts)}
 Resolve conflict markers and stage the resolved files. Do not commit or abort the merge.`,
       });
       assertSnapshot(original);
-      git(['add', '--', ...conflicts]);
+      git(['add', '-A']);
       if (git(['diff', '--name-only', '--diff-filter=U']).stdout.trim())
         throw new Error('Unresolved merge conflicts remain.');
     }

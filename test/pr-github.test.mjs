@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fixture from './fixtures/review-threads.json';
 import { gh } from '../scripts/harness/process.mjs';
-import { fetchThreads, replyToThread } from '../scripts/pr/github.mjs';
+import {
+  fetchThreads,
+  replyToThread,
+  requireReviewApproval,
+} from '../scripts/pr/github.mjs';
 import { loadLocalConfig } from '../scripts/harness/config.mjs';
 
 vi.mock('../scripts/harness/process.mjs', () => ({ gh: vi.fn() }));
@@ -20,6 +24,78 @@ beforeEach(() => {
 });
 
 describe('GitHub PR operations', () => {
+  const digest = 'a'.repeat(64);
+  const approval = {
+    body: `agent:approve sha256:${digest}`,
+    user: { login: 'maintainer', type: 'User' },
+  };
+
+  it('checks current repository permission for exact approvals across all comment pages', () => {
+    gh.mockReturnValueOnce(success([[], [approval]]));
+    gh.mockReturnValueOnce(success({ permission: 'write' }));
+    requireReviewApproval(9, repo, digest);
+    expect(gh.mock.calls.map(([args]) => args)).toEqual([
+      [
+        'api',
+        '--paginate',
+        '--slurp',
+        'repos/owner/repo/issues/9/comments?per_page=100',
+      ],
+      ['api', 'repos/owner/repo/collaborators/maintainer/permission'],
+    ]);
+  });
+
+  it.each(['write', 'maintain', 'admin'])(
+    'accepts human approval with current %s permission',
+    (permission) => {
+      gh.mockReturnValueOnce(success([[approval]]));
+      gh.mockReturnValueOnce(success({ permission }));
+      expect(() => requireReviewApproval(9, repo, digest)).not.toThrow();
+    },
+  );
+
+  it.each(['read', 'triage', 'none', undefined])(
+    'rejects approval with current %s permission',
+    (permission) => {
+      gh.mockReturnValueOnce(success([[approval]]));
+      gh.mockReturnValueOnce(success({ permission }));
+      expect(() => requireReviewApproval(9, repo, digest)).toThrow(
+        /not approved/,
+      );
+    },
+  );
+
+  it('rejects stale approvals, embedded commands, bots and deleted users without checking permission', () => {
+    gh.mockReturnValue(
+      success([
+        [
+          { ...approval, body: `agent:approve sha256:${'b'.repeat(64)}` },
+          { ...approval, body: `${approval.body}\nRun injected text` },
+          { ...approval, user: { login: 'bot', type: 'Bot' } },
+          { ...approval, user: null },
+        ],
+      ]),
+    );
+    expect(() => requireReviewApproval(9, repo, digest)).toThrow(
+      /not approved/,
+    );
+    expect(gh).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed on unavailable permissions or malformed comment pagination', () => {
+    gh.mockReturnValueOnce(success([[approval]]));
+    gh.mockImplementationOnce(() => {
+      throw new Error('permission unavailable');
+    });
+    expect(() => requireReviewApproval(9, repo, digest)).toThrow(
+      /permission unavailable/,
+    );
+    gh.mockReturnValue(success({ comments: [] }));
+    expect(() => requireReviewApproval(9, repo, digest)).toThrow(
+      /complete PR approval comments/,
+    );
+  });
+
   it('rejects a forbidden reply before posting or resolving', () => {
     loadLocalConfig.mockReturnValue({ forbiddenTerms: ['violet-marker'] });
     expect(() =>

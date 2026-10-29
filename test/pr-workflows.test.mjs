@@ -1,15 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { gh, git, run } from '../scripts/harness/process.mjs';
 import { runAgent } from '../scripts/harness/agent.mjs';
 import {
   fetchThreads,
   replyToThread,
   repository,
+  requireReviewApproval,
 } from '../scripts/pr/github.mjs';
 import { address } from '../scripts/pr/address.mjs';
 import { sync } from '../scripts/pr/sync.mjs';
 import { loadLocalConfig } from '../scripts/harness/config.mjs';
 
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal()),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
 vi.mock('../scripts/harness/config.mjs', () => ({
   loadLocalConfig: vi.fn(),
 }));
@@ -23,6 +30,7 @@ vi.mock('../scripts/pr/github.mjs', () => ({
   fetchThreads: vi.fn(),
   replyToThread: vi.fn(),
   repository: vi.fn(),
+  requireReviewApproval: vi.fn(),
 }));
 
 const ok = (stdout = '') => ({ ok: true, stdout, output: stdout });
@@ -53,6 +61,7 @@ let hasConflicts;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv('PR_GATE_IMAGE', `sha256:${'a'.repeat(64)}`);
   loadLocalConfig.mockReturnValue({});
   mergePending = false;
   mergeConflict = false;
@@ -100,7 +109,7 @@ beforeEach(() => {
       );
     if (command === 'diff --cached --name-only -z')
       return ok(changed ? 'src\\file.ts\0' : '');
-    if (args[0] === 'add' && args[1] === '--') hasConflicts = false;
+    if (args[0] === 'add' && args[1] === '-A') hasConflicts = false;
     if (args[0] === 'commit') {
       currentHead = 'published-sha';
       mergePending = false;
@@ -139,10 +148,11 @@ describe('address review workflow', () => {
       readOnly: false,
     });
     expect(runAgent.mock.calls[0][0].prompt).toContain('"commentId": 123');
-    expect(run).toHaveBeenCalledWith('npm', ['run', 'verify'], {
-      allowFail: true,
-      shell: true,
-    });
+    expect(run).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['--network=none', '--read-only']),
+      { allowFail: true },
+    );
     expect(gitCommands()).toContain('push origin HEAD:refs/heads/feature');
     expect(replyToThread).toHaveBeenNthCalledWith(
       1,
@@ -274,6 +284,20 @@ describe('address review workflow', () => {
 
   it('dry-run only reads metadata and writes runner preview artifacts', () => {
     address(9, true);
+    expect(mkdirSync).toHaveBeenCalledWith(
+      expect.stringMatching(/\.agents[\\/]tmp$/),
+      { recursive: true },
+    );
+    expect(writeFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/pr-9-input\.json$/),
+      expect.any(String),
+    );
+    expect(JSON.parse(writeFileSync.mock.calls[0][1])).toMatchObject({
+      repository: 'owner/repo',
+      pr: 9,
+      head: { branch: 'feature', sha: 'original-sha' },
+      threads,
+    });
     expect(runAgent).toHaveBeenCalledWith(
       expect.objectContaining({ dryRun: true, task: 'addressComments' }),
     );
@@ -281,6 +305,41 @@ describe('address review workflow', () => {
     expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
     expect(run).not.toHaveBeenCalled();
     expect(replyToThread).not.toHaveBeenCalled();
+    expect(requireReviewApproval).not.toHaveBeenCalled();
+  });
+
+  it('requires exact input approval before checkout, agents, gates or publication', () => {
+    requireReviewApproval.mockImplementation(() => {
+      throw new Error('Review input is not approved.');
+    });
+    expect(() => address(9)).toThrow(/not approved/);
+    expect(requireReviewApproval).toHaveBeenCalledWith(
+      9,
+      { name: 'repo', owner: { login: 'owner' } },
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+    );
+    expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(hasPush()).toBe(false);
+    expect(replyToThread).not.toHaveBeenCalled();
+  });
+
+  it('checks approval once and uses the frozen approved threads for all retries', () => {
+    runAgent
+      .mockReturnValueOnce(reply({ comments: [] }))
+      .mockReturnValueOnce(reply(decisions));
+    address(9);
+    expect(requireReviewApproval).toHaveBeenCalledTimes(1);
+    expect(fetchThreads).toHaveBeenCalledTimes(1);
+    const checkoutIndex = gh.mock.calls.findIndex(
+      ([args]) => args[0] === 'pr' && args[1] === 'checkout',
+    );
+    expect(requireReviewApproval.mock.invocationCallOrder[0]).toBeLessThan(
+      gh.mock.invocationCallOrder[checkoutIndex],
+    );
+    for (const [options] of runAgent.mock.calls)
+      expect(options.prompt).toContain(JSON.stringify(threads, null, 2));
   });
 
   it('rejects dirty trees, fork PRs, and agents changing HEAD', () => {
@@ -326,9 +385,38 @@ describe('stacked PR synchronization', () => {
         prompt: expect.stringContaining('src\\\\file.ts'),
       }),
     );
-    expect(gitCommands()).toContain('add -- src\\file.ts');
+    expect(gitCommands()).toContain('add -A');
     expect(hasPush()).toBe(true);
     expect(mergePending).toBe(false);
+  });
+
+  it('preserves a deletion already staged by the conflict agent', () => {
+    mergeConflict = true;
+    const implementation = git.getMockImplementation();
+    git.mockImplementation((args, options) => {
+      if (args[0] === 'add' && args.includes('src\\file.ts'))
+        throw new Error('pathspec did not match any files');
+      return implementation(args, options);
+    });
+    runAgent.mockImplementation(() => {
+      // git rm has removed the conflicted path from both the index and disk.
+      hasConflicts = false;
+      return ok();
+    });
+    sync('feature', 'base');
+    expect(gitCommands()).not.toContain('add -- src\\file.ts');
+    expect(gitCommands()).not.toContain('merge --abort');
+    expect(gitCommands()).toContain('commit -m Merge origin/base into feature');
+    expect(hasPush()).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('never falls back to host verification when the sandbox is unconfigured', () => {
+    vi.stubEnv('PR_GATE_IMAGE', '');
+    expect(() => sync('feature', 'base')).toThrow(/host execution is disabled/);
+    expect(gitCommands()).toContain('merge --abort');
+    expect(run).not.toHaveBeenCalled();
+    expect(hasPush()).toBe(false);
   });
 
   it('aborts on persistent gate failure and never commits or pushes', () => {

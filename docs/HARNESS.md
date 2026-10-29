@@ -121,6 +121,36 @@ the agent service and the orchestrator's GitHub operations must be handled by th
 environment without granting the write agent reusable maintainer credentials.
 Do not treat passing gates or later PR review as protection against tool execution.
 
+Start PR workflows from a reviewed, trusted revision of the orchestrator and its
+imported modules, never by launching scripts from an unreviewed PR checkout. The
+orchestrator and fixed PR gate definition are loaded before checkout/merge; changing
+branch files does not reload them. Write agents still require the externally isolated
+environment described above.
+
+PR quality gates additionally run branch code only in disposable Linux Docker
+containers. Set `PR_GATE_IMAGE` to a trusted local image ID (`sha256:<64 hex digits>`)
+or repository digest (`name@sha256:<64 hex digits>`). Tags are rejected and images
+are never pulled by the workflow. The image must be secretless, provide `/bin/sh`,
+`cp`, `ln`, Node >=22.12, and the project's preinstalled Linux dependencies at
+`/opt/node_modules`, readable by UID/GID 65534. Prepare it separately from a trusted
+revision and lockfile, not from PR-controlled Dockerfiles or install scripts. For
+example, use a digest-pinned Node Linux base, copy the trusted package manifests to
+`/opt`, and run `npm ci --ignore-scripts --no-audit --no-fund` while provisioning.
+Provisioning may need network access; gate execution never has it.
+
+The gate has no network, host credentials, Git metadata, host dependency mount, or
+writable host mount. It receives a read-only temporary snapshot of tracked and
+non-ignored new files (including agent edits), excluding local agent configuration,
+agent artifacts, `.env` files, and dependencies. Keep secrets out of source files.
+Symlinks and non-regular input files are rejected. The container runs unprivileged,
+with dropped capabilities, no-new-privileges, a read-only root, resource limits, and
+temporary writable workspace storage; its source snapshot is removed afterward.
+The trusted gate directly runs build, tests, lint, and typecheck, rather than a PR's
+mutable `package.json` verification command. The orchestrator runs the local text
+policy using trusted code on the host. Missing images, Docker, or prerequisites
+fail closed: there is no host-execution fallback. This container boundary protects
+gate execution only, not the write agent.
+
 ### Local text policy
 
 Set `forbiddenTerms` in the ignored `.agents/harness.local.json` to the owner's
@@ -202,9 +232,20 @@ Deleted authors and unavailable lines are `null`. `pr:reply` takes that root com
 posts only the supplied message without an attribution footer, then resolves the thread
 unless `--no-resolve` is supplied.
 
-`pr:address` checks out the same-repository PR head (forks are rejected), requires a
-clean tree before and after checkout, and gives every unresolved thread to
-`addressComments`. The agent must finish with fenced JSON:
+`pr:address -- <pr> --dry-run` first saves `.agents/tmp/pr-<pr>-input.json` and prints
+`agent:approve sha256:<digest>`. Review the entire saved snapshot, then have a human
+with current repository write, maintain, or admin access post that exact single-line
+command as a PR conversation comment. The digest covers repository, PR number,
+head branch and SHA, and every supplied unresolved thread's ID, comment ID, author,
+path, line, and body. Thread edits, additions, removals, or a changed PR head invalidate
+approval. All approval comment pages are fetched and the approving human's current
+repository permission is checked; bots and read/triage-only accounts cannot approve.
+Approval is required before checkout or any write-agent execution, including retries.
+The frozen approved threads, not a later refetch, are passed to the agent.
+
+`pr:address` checks out the approved same-repository PR head (forks are rejected),
+requires a clean tree before and after checkout, and gives every approved unresolved
+thread to `addressComments`. The agent must finish with fenced JSON:
 
 ```json
 {
@@ -216,7 +257,8 @@ clean tree before and after checkout, and gives every unresolved thread to
 
 Every input ID must appear exactly once; actions are `fixed` or `declined`, and replies
 must be nonempty single lines. Invalid output is retried once, then the script fails
-without publishing. The gate is `npm run verify`, with up to two agent fix retries.
+without publishing. The gate is the isolated PR gate described above (the build,
+tests, lint, typecheck, and local text-policy checks), with up to two agent fix retries.
 Only after it passes does the script commit and push changes, then reply with the
 commit SHA and the agent's explanation. Only `fixed` threads are resolved.
 An all-declined run without changes replies using the current SHA without an empty
@@ -228,7 +270,8 @@ edit code, invoke models, run the gate, commit, push, or reply.
 `pr:sync` fetches both branches, switches to the local head branch, requires it to match
 its remote head, and merges `origin/<base>` using `--no-commit --no-ff`. A clean merge
 is gated and committed before pushing. Conflicted files go to `implement` via the same
-runner. The gate can request up to two fixes; if it still fails, the pending merge is
+runner. Path-free staging preserves deletions already resolved with `git rm`.
+The isolated PR gate can request up to two fixes; if it still fails, the pending merge is
 aborted and nothing is pushed. An already-up-to-date branch is gated without agent
 fixes. The script leaves the head branch checked out. A push or GitHub reply failure
 is reported explicitly; inspect the local commit/posted replies before retrying.
