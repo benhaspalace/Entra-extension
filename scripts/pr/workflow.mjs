@@ -34,14 +34,37 @@ export function assertSnapshot(original) {
     throw new Error('Agent changed the branch or HEAD; refusing to publish.');
 }
 
-export function agent(options) {
-  const result = runAgent({ readOnly: false, dryRun: false, ...options });
+export function assertNoTrackedRuntimeFiles(ref) {
+  const files = git(
+    ref
+      ? ['ls-tree', '-r', '--name-only', '-z', ref]
+      : ['ls-files', '--cached', '-z'],
+  )
+    .stdout.split('\0')
+    .filter(Boolean);
+  for (const file of files) {
+    const parts = file.toLowerCase().split(/[\\/]/);
+    if (
+      parts.includes('node_modules') ||
+      (parts[0] === '.agents' &&
+        (parts.length === 1 ||
+          ['harness.local.json', 'tmp'].includes(parts[1])))
+    )
+      throw new Error(`Tracked local/runtime file is not allowed: ${file}`);
+  }
+}
+
+export function agent(options, runner = runAgent) {
+  assertNoTrackedRuntimeFiles();
+  const result = runner({ readOnly: false, dryRun: false, ...options });
+  assertNoTrackedRuntimeFiles();
   if (!result.ok)
     throw new Error(`agent ${options.role} failed:\n${tail(result.output)}`);
   return result.stdout;
 }
 
 export function verify() {
+  assertNoTrackedRuntimeFiles();
   const result = verifyInSandbox();
   const output = redactEnvironmentPaths(result.output);
   assertClean('Quality gate output', output);
@@ -49,14 +72,17 @@ export function verify() {
   return { ...result, stdout: redactEnvironmentPaths(result.stdout), output };
 }
 
-export function gateWithRetries(role, task, context) {
+export function gateWithRetries(role, task, context, runner = runAgent) {
   let result = verify();
   for (let attempt = 1; !result.ok && attempt <= 2; attempt++) {
-    agent({
-      role: `${role}-gate-${attempt}`,
-      task,
-      prompt: `${AGENT_RULES}\n${context}\nFix this quality gate failure, preserving the intended changes:\n\n${tail(result.output, 16000)}`,
-    });
+    agent(
+      {
+        role: `${role}-gate-${attempt}`,
+        task,
+        prompt: `${AGENT_RULES}\n${context}\nFix this quality gate failure, preserving the intended changes:\n\n${tail(result.output, 16000)}`,
+      },
+      runner,
+    );
     result = verify();
   }
   if (!result.ok)

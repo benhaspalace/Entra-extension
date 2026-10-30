@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { git } from '../harness/process.mjs';
+import { createAgentRunner } from '../harness/agent.mjs';
 import {
   AGENT_RULES,
   agent,
   assertSnapshot,
+  assertNoTrackedRuntimeFiles,
   gateWithRetries,
   requireClean,
   snapshot,
@@ -19,9 +21,14 @@ export function sync(branch, base) {
   }
   if (branch === base) throw new Error('Branch and base must differ.');
   requireClean();
+  assertNoTrackedRuntimeFiles();
+  const runner = createAgentRunner();
   git(['fetch', 'origin', '--', branch, base]);
+  for (const ref of [branch, base])
+    assertNoTrackedRuntimeFiles(`refs/remotes/origin/${ref}`);
   git(['switch', '--', branch]);
   requireClean();
+  assertNoTrackedRuntimeFiles();
   // Never publish from a stale or divergent local head.
   if (
     git(['rev-parse', 'HEAD']).stdout.trim() !==
@@ -42,13 +49,16 @@ export function sync(branch, base) {
         throw new Error(
           `Merge failed without file conflicts:\n${merge.output}`,
         );
-      agent({
-        role: 'pr-sync-conflicts',
-        task: 'implement',
-        prompt: `${AGENT_RULES}\nResolve the current merge of origin/${base} into ${branch}, preserving both branches' intended behavior.
+      agent(
+        {
+          role: 'pr-sync-conflicts',
+          task: 'implement',
+          prompt: `${AGENT_RULES}\nResolve the current merge of origin/${base} into ${branch}, preserving both branches' intended behavior.
 Conflicted files: ${JSON.stringify(conflicts)}
 Resolve conflict markers and stage the resolved files. Do not commit or abort the merge.`,
-      });
+        },
+        runner,
+      );
       assertSnapshot(original);
       git(['add', '-A']);
       if (git(['diff', '--name-only', '--diff-filter=U']).stdout.trim())
@@ -62,6 +72,7 @@ Resolve conflict markers and stage the resolved files. Do not commit or abort th
         'pr-sync',
         'implement',
         `Resolve the merge of origin/${base} into ${branch}.`,
+        runner,
       );
     } else {
       const result = verify();

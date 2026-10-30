@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { gh, git, run } from '../scripts/harness/process.mjs';
-import { runAgent } from '../scripts/harness/agent.mjs';
+import { createAgentRunner, runAgent } from '../scripts/harness/agent.mjs';
 import {
   fetchThreads,
   replyToThread,
@@ -28,7 +28,10 @@ vi.mock('../scripts/harness/process.mjs', () => ({
   git: vi.fn(),
   run: vi.fn(),
 }));
-vi.mock('../scripts/harness/agent.mjs', () => ({ runAgent: vi.fn() }));
+vi.mock('../scripts/harness/agent.mjs', () => ({
+  runAgent: vi.fn(),
+  createAgentRunner: vi.fn(),
+}));
 vi.mock('../scripts/pr/github.mjs', () => ({
   fetchThreads: vi.fn(),
   replyToThread: vi.fn(),
@@ -63,6 +66,7 @@ let changed;
 let currentHead;
 let currentBranch;
 let hasConflicts;
+const frozenRunner = vi.fn((options) => runAgent(options));
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -94,6 +98,8 @@ beforeEach(() => {
   });
   run.mockReturnValue(ok());
   runAgent.mockReturnValue(reply(decisions));
+  frozenRunner.mockImplementation((options) => runAgent(options));
+  createAgentRunner.mockReturnValue(frozenRunner);
   git.mockImplementation((args) => {
     const command = args.join(' ');
     if (command === 'status --porcelain') return ok(dirty ? ' M file' : '');
@@ -152,6 +158,12 @@ describe('address review workflow', () => {
   it('checks out the head, gates, commits and pushes before replying, resolving fixed only', () => {
     address(9);
     expect(gh).toHaveBeenCalledWith(['pr', 'checkout', '9']);
+    const checkoutIndex = gh.mock.calls.findIndex(
+      ([args]) => args[0] === 'pr' && args[1] === 'checkout',
+    );
+    expect(createAgentRunner.mock.invocationCallOrder[0]).toBeLessThan(
+      gh.mock.invocationCallOrder[checkoutIndex],
+    );
     expect(runAgent.mock.calls[0][0]).toMatchObject({
       task: 'addressComments',
       readOnly: false,
@@ -211,6 +223,8 @@ describe('address review workflow', () => {
     expect(() => address(9)).toThrow(/still failing/);
     expect(run).toHaveBeenCalledTimes(3);
     expect(runAgent).toHaveBeenCalledTimes(3);
+    expect(createAgentRunner).toHaveBeenCalledTimes(1);
+    expect(frozenRunner).toHaveBeenCalledTimes(3);
     expect(
       runAgent.mock.calls
         .slice(1)
@@ -311,6 +325,7 @@ describe('address review workflow', () => {
       expect.objectContaining({ dryRun: true, task: 'addressComments' }),
     );
     expect(git).not.toHaveBeenCalled();
+    expect(createAgentRunner).not.toHaveBeenCalled();
     expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
     expect(run).not.toHaveBeenCalled();
     expect(replyToThread).not.toHaveBeenCalled();
@@ -491,6 +506,29 @@ describe('address review workflow', () => {
     expect(run).not.toHaveBeenCalled();
     expect(hasPush()).toBe(false);
   });
+
+  it.each([
+    '.agents/harness.local.json',
+    'node_modules/.bin/pwn',
+    '.agents/tmp/reply.md',
+  ])(
+    'rejects tracked runtime file %s introduced by PR checkout before launching agents',
+    (file) => {
+      const implementation = git.getMockImplementation();
+      git.mockImplementation((args, options) => {
+        const checkedOut = gh.mock.calls.some(
+          ([command]) => command[0] === 'pr' && command[1] === 'checkout',
+        );
+        if (checkedOut && args[0] === 'ls-files' && args.includes('--cached'))
+          return ok(`${file}\0`);
+        return implementation(args, options);
+      });
+      expect(() => address(9)).toThrow(/Tracked local\/runtime file/);
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+      expect(hasPush()).toBe(false);
+    },
+  );
 });
 
 describe('stacked PR synchronization', () => {
@@ -516,6 +554,13 @@ describe('stacked PR synchronization', () => {
     expect(gitCommands()).toContain('add -A');
     expect(hasPush()).toBe(true);
     expect(mergePending).toBe(false);
+    const switchIndex = git.mock.calls.findIndex(
+      ([args]) => args[0] === 'switch',
+    );
+    expect(createAgentRunner.mock.invocationCallOrder[0]).toBeLessThan(
+      git.mock.invocationCallOrder[switchIndex],
+    );
+    expect(createAgentRunner).toHaveBeenCalledTimes(1);
   });
 
   it('preserves a deletion already staged by the conflict agent', () => {
@@ -552,6 +597,8 @@ describe('stacked PR synchronization', () => {
     run.mockReturnValue(failed);
     expect(() => sync('feature', 'base')).toThrow(/still failing/);
     expect(run).toHaveBeenCalledTimes(3);
+    expect(createAgentRunner).toHaveBeenCalledTimes(1);
+    expect(frozenRunner).toHaveBeenCalledTimes(3);
     expect(gitCommands()).toContain('merge --abort');
     expect(gitCommands().some((command) => command.startsWith('commit'))).toBe(
       false,
@@ -605,4 +652,28 @@ describe('stacked PR synchronization', () => {
     expect(() => sync('feature', 'base')).toThrow(/match its remote/);
     expect(hasPush()).toBe(false);
   });
+
+  it.each(['feature', 'base'])(
+    'rejects tracked local/runtime files in the remote %s before switching branches',
+    (ref) => {
+      const implementation = git.getMockImplementation();
+      git.mockImplementation((args, options) => {
+        if (
+          args[0] === 'ls-tree' &&
+          args.at(-1) === `refs/remotes/origin/${ref}`
+        )
+          return ok('.agents/harness.local.json\0node_modules/.bin/pwn\0');
+        return implementation(args, options);
+      });
+      expect(() => sync('feature', 'base')).toThrow(
+        /Tracked local\/runtime file/,
+      );
+      expect(
+        gitCommands().some((command) => command.startsWith('switch')),
+      ).toBe(false);
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+      expect(hasPush()).toBe(false);
+    },
+  );
 });

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { run } from '../scripts/harness/process.mjs';
-import { runAgent } from '../scripts/harness/agent.mjs';
+import { createAgentRunner, runAgent } from '../scripts/harness/agent.mjs';
+import { resolveAgentExecutable } from '../scripts/harness/executable.mjs';
 
 vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
@@ -10,10 +11,16 @@ vi.mock('node:fs', () => ({
   writeFileSync: vi.fn(),
 }));
 vi.mock('../scripts/harness/process.mjs', () => ({ run: vi.fn() }));
+vi.mock('../scripts/harness/executable.mjs', () => ({
+  resolveAgentExecutable: vi.fn(),
+}));
+
+const executable = resolve('trusted-tools', 'agent-cli.exe');
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  resolveAgentExecutable.mockReturnValue(executable);
   for (const key of [
     'AGENT_CLI',
     'REVIEW_BOT_LOGIN',
@@ -56,7 +63,9 @@ describe('shared agent runner', () => {
       'reply\nstderr',
     );
     const [cli, args, options] = run.mock.calls[0];
-    expect(cli).toBe('agent-cli');
+    expect(cli).toBe(
+      process.platform === 'win32' ? `"${executable}"` : executable,
+    );
     expect(args.slice(0, 2)).toEqual(['--model', 'model-a']);
     const instruction = `Read ${join('.agents', 'tmp', 'test-1-prompt.md')} and follow it exactly.`;
     expect(args[3]).toBe(
@@ -101,10 +110,32 @@ describe('shared agent runner', () => {
       output: '',
     });
     expect(run).not.toHaveBeenCalled();
+    expect(resolveAgentExecutable).not.toHaveBeenCalled();
     expect(writeFileSync).toHaveBeenCalledWith(
       join('.agents', 'tmp', 'preview-reply.md'),
       '',
     );
+  });
+
+  it('freezes configuration and the absolute executable across branch changes and retries', () => {
+    const runner = createAgentRunner();
+    readFileSync.mockImplementation(() => {
+      throw new Error('Branch configuration must not be reloaded');
+    });
+    vi.stubEnv('AGENT_CLI', 'untrusted-cli');
+    vi.stubEnv('AGENT_MODEL_IMPLEMENT', 'untrusted-model');
+    resolveAgentExecutable.mockReturnValue(
+      resolve('node_modules', '.bin', 'pwn'),
+    );
+    for (const role of ['conflict', 'gate-retry'])
+      runner({ role, task: 'implement', prompt: 'Work.' });
+    expect(resolveAgentExecutable).toHaveBeenCalledExactlyOnceWith('agent-cli');
+    for (const [cli, args] of run.mock.calls) {
+      expect(cli).toBe(
+        process.platform === 'win32' ? `"${executable}"` : executable,
+      );
+      expect(args.slice(0, 2)).toEqual(['--model', 'model-a']);
+    }
   });
 
   it.each([false, true])(

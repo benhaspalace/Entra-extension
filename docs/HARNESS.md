@@ -50,6 +50,9 @@ One-time setup: copy `.agents/harness.local.example.json` to
 binary name, task model IDs, and automated reviewer's login. The local file is
 git-ignored; never commit it. The CLI must be available on `PATH` and signed in.
 Only a binary name (not a path or command with arguments) is supported.
+Executable lookup ignores empty/relative PATH entries and repository-local paths
+(including npm's `node_modules/.bin`), and rejects symlinks back into the repository.
+Install the CLI outside the checkout.
 
 Then create the workflow labels:
 
@@ -126,6 +129,14 @@ imported modules, never by launching scripts from an unreviewed PR checkout. The
 orchestrator and fixed PR gate definition are loaded before checkout/merge; changing
 branch files does not reload them. Write agents still require the externally isolated
 environment described above.
+
+Before PR checkout or merge, the workflow snapshots agent configuration and resolves
+the CLI to an absolute executable outside the repository. All conflict, review-address,
+and gate-fix calls reuse that runner without rereading branch configuration or searching
+PATH again. Even a clean sync requires this trusted CLI setup. Tracked
+`.agents/harness.local.json`, `.agents/tmp`, and `node_modules` files are rejected,
+including on incoming sync branches, after PR checkout, and before agent/gate execution.
+Ignored runtime files must remain local, never force-added to a branch.
 
 PR quality gates additionally run branch code only in disposable Linux Docker
 containers. `PR_GATE_IMAGE` overrides `prGateImage` in the ignored local configuration.
