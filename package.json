@@ -20,7 +20,8 @@
     "pr:comments": "node scripts/pr/comments.mjs",
     "pr:reply": "node scripts/pr/reply.mjs",
     "pr:address": "node scripts/pr/address.mjs",
-    "pr:sync": "node scripts/pr/sync.mjs"
+    "pr:sync": "node scripts/pr/sync.mjs",
+    "gate:image": "node scripts/pr/build-gate-image.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

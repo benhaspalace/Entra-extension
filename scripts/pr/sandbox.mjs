@@ -9,6 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { git, run } from '../harness/process.mjs';
+import { loadLocalConfig } from '../harness/config.mjs';
 
 // Loaded with the orchestrator, not from package.json on the checked-out branch.
 const GATE = [
@@ -22,13 +23,13 @@ const GATE = [
 ].join(' && ');
 
 export function verifyInSandbox() {
-  const image = process.env.PR_GATE_IMAGE;
+  const image = process.env.PR_GATE_IMAGE ?? loadLocalConfig().prGateImage;
   if (
     typeof image !== 'string' ||
     !/^(?:[a-zA-Z0-9][a-zA-Z0-9./:_-]*@)?sha256:[a-f0-9]{64}$/.test(image)
   )
     throw new Error(
-      'Set PR_GATE_IMAGE to a trusted, digest-pinned Linux image with Node and dependencies in /opt/node_modules; host execution is disabled.',
+      'Set PR_GATE_IMAGE or local prGateImage to a trusted, digest-pinned Linux image with Node and dependencies in /opt/node_modules (npm run gate:image); host execution is disabled.',
     );
   const root = resolve(process.cwd());
   const directory = mkdtempSync(join(tmpdir(), 'entra-pr-gate-'));

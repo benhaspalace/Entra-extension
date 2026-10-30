@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import fixture from './fixtures/review-threads.json';
 import {
   createReviewSnapshot,
+  isTrustedReviewComment,
+  normalizeReviewBotLogin,
   formatReply,
   isAddressResult,
   parseAddressResult,
@@ -44,6 +46,108 @@ describe('agent model routing', () => {
 });
 
 describe('PR pure helpers', () => {
+  it.each(['review-bot', 'review-bot[bot]', 'Review-Bot[bot]'])(
+    'normalizes configured bot login %s to the GraphQL representation',
+    (login) => {
+      expect(normalizeReviewBotLogin(login)).toBe('review-bot');
+      expect(
+        isTrustedReviewComment(
+          { author: 'Review-Bot', authorType: 'Bot' },
+          login,
+        ),
+      ).toBe(true);
+      expect(
+        isTrustedReviewComment(
+          { author: 'review-bot[bot]', authorType: 'Bot' },
+          login,
+        ),
+      ).toBe(true);
+      expect(
+        isTrustedReviewComment(
+          { author: 'review-bot', authorType: 'User' },
+          login,
+          'read',
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    undefined,
+    null,
+    123,
+    '',
+    ' ',
+    '<review-bot-login>',
+    'bot;command',
+    ' review-bot',
+    'review-bot[bot][bot]',
+  ])('rejects invalid configured bot login %s with setup guidance', (login) => {
+    expect(() => normalizeReviewBotLogin(login)).toThrow(
+      /REVIEW_BOT_LOGIN.*harness\.local\.json/,
+    );
+  });
+
+  it('trusts only a verified configured bot or current write-level permission', () => {
+    const bot = { author: 'review-bot', authorType: 'Bot' };
+    expect(isTrustedReviewComment(bot, 'review-bot')).toBe(true);
+    expect(
+      isTrustedReviewComment(
+        { ...bot, authorType: 'User' },
+        'review-bot',
+        'read',
+      ),
+    ).toBe(false);
+    expect(
+      isTrustedReviewComment(
+        { ...bot, authorType: 'User' },
+        'review-bot',
+        'write',
+      ),
+    ).toBe(true);
+    expect(isTrustedReviewComment(bot, 'other-bot', 'triage')).toBe(false);
+    for (const authorType of ['Bot', 'Organization', null, undefined])
+      expect(
+        isTrustedReviewComment(
+          { author: 'writer', authorType },
+          'review-bot',
+          'admin',
+        ),
+      ).toBe(false);
+    expect(
+      isTrustedReviewComment({ author: null }, 'review-bot', 'admin'),
+    ).toBe(false);
+  });
+
+  it('binds approval to all untrusted reply content and identities, not just the root', () => {
+    const repo = { name: 'repo', owner: { login: 'owner' } };
+    const head = { headRefName: 'feature', headRefOid: 'abc123' };
+    const threads = shapeThreads(fixture);
+    const reply = {
+      ...threads[0].comments[0],
+      commentId: 999,
+      author: 'reader',
+      authorType: 'User',
+      body: 'Reply input',
+    };
+    const untrusted = [
+      { ...threads[0], comments: [...threads[0].comments, reply] },
+    ];
+    const input = createReviewSnapshot(repo, 9, head, untrusted);
+    for (const change of [
+      { comments: threads[0].comments },
+      ...['commentId', 'author', 'authorType', 'path', 'line', 'body'].map(
+        (field) => ({
+          comments: [threads[0].comments[0], { ...reply, [field]: 'changed' }],
+        }),
+      ),
+    ])
+      expect(
+        createReviewSnapshot(repo, 9, head, [{ ...untrusted[0], ...change }])
+          .digest,
+      ).not.toBe(input.digest);
+  });
+
   it('binds review approval to the repository, PR, head and exact thread snapshot', () => {
     const repo = { name: 'repo', owner: { login: 'owner' } };
     const head = { headRefName: 'feature', headRefOid: 'abc123' };
@@ -82,7 +186,7 @@ describe('PR pure helpers', () => {
   });
 
   it('shapes unresolved GraphQL review threads and preserves unavailable metadata', () => {
-    expect(shapeThreads(fixture)).toEqual([
+    const expected = [
       {
         threadId: 'thread-open',
         commentId: 4416706313,
@@ -99,7 +203,13 @@ describe('PR pure helpers', () => {
         line: null,
         body: 'Outdated comment.',
       },
-    ]);
+    ].map(({ threadId, ...comment }) => ({
+      threadId,
+      ...comment,
+      authorType: null,
+      comments: [{ ...comment, authorType: null }],
+    }));
+    expect(shapeThreads(fixture)).toEqual(expected);
     expect(shapeThreads(fixture, false)).toHaveLength(3);
     const empty = globalThis.structuredClone(fixture);
     empty.data.repository.pullRequest.reviewThreads.nodes = [];

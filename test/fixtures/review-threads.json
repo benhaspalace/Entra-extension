@@ -16,7 +16,8 @@
                     "line": 42,
                     "body": "Please follow the next page."
                   }
-                ]
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
               }
             },
             {
@@ -31,7 +32,8 @@
                     "line": 10,
                     "body": "Already fixed."
                   }
-                ]
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
               }
             },
             {
@@ -46,7 +48,8 @@
                     "line": null,
                     "body": "Outdated comment."
                   }
-                ]
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
               }
             }
           ],

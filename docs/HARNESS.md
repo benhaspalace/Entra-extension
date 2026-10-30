@@ -128,15 +128,31 @@ branch files does not reload them. Write agents still require the externally iso
 environment described above.
 
 PR quality gates additionally run branch code only in disposable Linux Docker
-containers. Set `PR_GATE_IMAGE` to a trusted local image ID (`sha256:<64 hex digits>`)
+containers. `PR_GATE_IMAGE` overrides `prGateImage` in the ignored local configuration.
+Set either to a trusted local image ID (`sha256:<64 hex digits>`)
 or repository digest (`name@sha256:<64 hex digits>`). Tags are rejected and images
 are never pulled by the workflow. The image must be secretless, provide `/bin/sh`,
 `cp`, `ln`, Node >=22.12, and the project's preinstalled Linux dependencies at
-`/opt/node_modules`, readable by UID/GID 65534. Prepare it separately from a trusted
-revision and lockfile, not from PR-controlled Dockerfiles or install scripts. For
-example, use a digest-pinned Node Linux base, copy the trusted package manifests to
-`/opt`, and run `npm ci --ignore-scripts --no-audit --no-fund` while provisioning.
-Provisioning may need network access; gate execution never has it.
+`/opt/node_modules`, readable by UID/GID 65534. Provision it from a reviewed, trusted
+revision of these scripts and Dockerfile, never from an unreviewed PR checkout:
+
+```bash
+npm run gate:image
+npm run gate:image -- --ref <trusted-ref-with-lockfile>
+```
+
+The default ref is `origin/main`; fetch it separately if needed. The script resolves
+the ref to a commit and reads **both** manifests using `git show`, never from working
+files. A missing lockfile fails with `--ref` guidance. It pulls `node:22-bookworm-slim`,
+inspects its repository digest, and builds `docker/gate.Dockerfile` using that immutable
+base and only the trusted manifests in a temporary build context. Dependencies are
+installed with `npm ci --ignore-scripts --no-audit --no-fund` under `/opt`; install
+lifecycle scripts are disabled. The resulting `sha256:...` image ID is printed and
+saved as local `prGateImage`, preserving other settings. Local `prGateImageSource`
+records the trusted commit and Node base digest; the commit is also an image label.
+Provisioning needs Docker with Linux containers and may need network access; gate
+execution never has network access or pulls images. Rebuild when trusted dependencies
+change. Only provision refs whose manifests and dependencies you trust.
 
 The gate has no network, host credentials, Git metadata, host dependency mount, or
 writable host mount. It receives a read-only temporary snapshot of tracked and
@@ -224,27 +240,51 @@ npm run pr:sync -- feature-branch base-branch
 ```
 
 `pr:comments` prints a JSON array of unresolved review threads, paging all GraphQL
-`reviewThreads`. Each entry represents the thread's first comment and includes
+`reviewThreads` and all pages of comments within each thread. Each entry represents
+the thread's first comment and includes
 `threadId`, `commentId` (from GraphQL `fullDatabaseId`, normalized to a positive safe
-JavaScript integer), `author`, `path`, `line`, and `body`. IDs beyond JavaScript's safe
+JavaScript integer), `author`, `authorType`, `path`, `line`, and `body`, plus `comments`
+containing the same comment fields for every comment, including replies. `authorType`
+is GitHub's verified GraphQL `__typename`, not a claim in the comment text.
+IDs beyond JavaScript's safe
 integer range are rejected rather than rounded.
 Deleted authors and unavailable lines are `null`. `pr:reply` takes that root comment ID,
 posts only the supplied message without an attribution footer, then resolves the thread
 unless `--no-resolve` is supplied.
 
-`pr:address -- <pr> --dry-run` first saves `.agents/tmp/pr-<pr>-input.json` and prints
-`agent:approve sha256:<digest>`. Review the entire saved snapshot, then have a human
+`pr:address` automatically includes a thread only when **every** comment is from
+either the configured `reviewBotLogin` (`REVIEW_BOT_LOGIN` overrides local config)
+verified by GitHub as a Bot, or a User with current repository write, maintain,
+or admin permission. The configured login is validated before classification and
+compared case-insensitively, accepting either the GraphQL bot login or its REST-style
+`[bot]` suffix. A matching login with a User type does not establish bot trust;
+it must independently have write access. Permissions are fetched from the collaborator
+permission endpoint and cached per login for the run, including approval checks.
+Only User authors enter permission lookup; other bots, deleted authors, unknown author
+types, and read/triage-only accounts are untrusted. Mixed threads are
+untrusted if even one comment is untrusted. These checks do not filter out trusted
+human reviews or require approval for verified configured-bot reviews.
+
+When untrusted threads exist, `pr:address` (including `--dry-run`) saves
+`.agents/tmp/pr-<pr>-input.json` and prints `agent:approve sha256:<digest>`.
+Review the entire saved snapshot, then have a human
 with current repository write, maintain, or admin access post that exact single-line
 command as a PR conversation comment. The digest covers repository, PR number,
-head branch and SHA, and every supplied unresolved thread's ID, comment ID, author,
-path, line, and body. Thread edits, additions, removals, or a changed PR head invalidate
-approval. All approval comment pages are fetched and the approving human's current
+head branch and SHA, and **only the untrusted unresolved threads**, including every
+comment's ID, author/type, path, line, and body. Changes to trusted threads do not
+change this digest; untrusted thread edits, additions, removals, replies, or a changed
+PR head invalidate approval. All approval comment pages are fetched and the approving human's current
 repository permission is checked; bots and read/triage-only accounts cannot approve.
-Approval is required before checkout or any write-agent execution, including retries.
-The frozen approved threads, not a later refetch, are passed to the agent.
+Untrusted threads are included only after a matching approval is found, before checkout
+or write-agent execution, including retries. Otherwise they are explicitly excluded
+while trusted threads proceed. If only unapproved untrusted threads remain, the script
+prints a clear message and exits successfully without checkout, agents, gates, or
+publication. The frozen selected threads, not a later refetch, are passed to the agent.
+Dry-run previews all unresolved threads (including unapproved input) without executing
+them, and does not check for approvals. All-trusted runs need no approval snapshot.
 
-`pr:address` checks out the approved same-repository PR head (forks are rejected),
-requires a clean tree before and after checkout, and gives every approved unresolved
+`pr:address` checks out the selected same-repository PR head (forks are rejected),
+requires a clean tree before and after checkout, and gives every trusted or approved unresolved
 thread to `addressComments`. The agent must finish with fenced JSON:
 
 ```json

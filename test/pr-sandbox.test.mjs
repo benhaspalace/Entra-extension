@@ -12,7 +12,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { git, run } from '../scripts/harness/process.mjs';
 import { verifyInSandbox } from '../scripts/pr/sandbox.mjs';
+import { loadLocalConfig } from '../scripts/harness/config.mjs';
 
+vi.mock('../scripts/harness/config.mjs', () => ({ loadLocalConfig: vi.fn() }));
 vi.mock('../scripts/harness/process.mjs', () => ({
   git: vi.fn(),
   run: vi.fn(),
@@ -33,6 +35,7 @@ function file(path, content = 'source') {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('PR_GATE_IMAGE', image);
+  loadLocalConfig.mockReturnValue({});
   root = mkdtempSync(join(tmpdir(), 'entra-pr-sandbox-test-'));
   files = [];
   snapshot = undefined;
@@ -52,6 +55,36 @@ afterEach(() => {
 });
 
 describe('isolated PR quality gate', () => {
+  it('falls back to local prGateImage when the environment override is absent', () => {
+    vi.stubEnv('PR_GATE_IMAGE', undefined);
+    loadLocalConfig.mockReturnValue({ prGateImage: image });
+    verifyInSandbox();
+    expect(run.mock.calls[0][1]).toContain(image);
+  });
+
+  it('prefers the environment image and rejects an invalid override instead of falling back', () => {
+    loadLocalConfig.mockReturnValue({
+      prGateImage: `sha256:${'b'.repeat(64)}`,
+    });
+    verifyInSandbox();
+    expect(run.mock.calls[0][1]).toContain(image);
+    expect(loadLocalConfig).not.toHaveBeenCalled();
+    vi.stubEnv('PR_GATE_IMAGE', 'mutable:tag');
+    expect(() => verifyInSandbox()).toThrow(/host execution is disabled/);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an invalid local image and surfaces unreadable configuration', () => {
+    vi.stubEnv('PR_GATE_IMAGE', undefined);
+    loadLocalConfig.mockReturnValue({ prGateImage: 'mutable:tag' });
+    expect(() => verifyInSandbox()).toThrow(/host execution is disabled/);
+    loadLocalConfig.mockImplementationOnce(() => {
+      throw new Error('Cannot read local configuration');
+    });
+    expect(() => verifyInSandbox()).toThrow(/Cannot read local configuration/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('runs a fixed gate in a disposable, unprivileged, offline container with only a read-only source snapshot', () => {
     file('package.json', '{"scripts":{"verify":"malicious host command"}}');
     file(join('src', 'new.ts'), 'new change');

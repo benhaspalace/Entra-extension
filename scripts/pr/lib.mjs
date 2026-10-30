@@ -25,6 +25,46 @@ export function formatReply(message) {
   return message.trim();
 }
 
+export function normalizeReviewBotLogin(login) {
+  if (
+    typeof login !== 'string' ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9-]*(?:\[bot\])?$/.test(login)
+  )
+    throw new Error(
+      'Missing or invalid review bot login (REVIEW_BOT_LOGIN). Set REVIEW_BOT_LOGIN or reviewBotLogin in .agents/harness.local.json to a valid bot login.',
+    );
+  return login.replace(/\[bot\]$/, '').toLowerCase();
+}
+
+export function isTrustedReviewComment(comment, reviewBotLogin, permission) {
+  if (!comment.author) return false;
+  return (
+    (comment.authorType === 'Bot' &&
+      comment.author.toLowerCase().replace(/\[bot\]$/, '') ===
+        normalizeReviewBotLogin(reviewBotLogin)) ||
+    (comment.authorType === 'User' &&
+      ['write', 'maintain', 'admin'].includes(permission))
+  );
+}
+
+function shapeComment(comment) {
+  const rawId = comment?.fullDatabaseId;
+  const commentId =
+    typeof rawId === 'string' && /^[1-9]\d*$/.test(rawId)
+      ? Number(rawId)
+      : rawId;
+  if (!Number.isSafeInteger(commentId) || commentId <= 0)
+    throw new Error('GitHub returned a review thread without a root comment.');
+  return {
+    commentId,
+    author: comment.author?.login ?? null,
+    authorType: comment.author?.__typename ?? null,
+    path: comment.path,
+    line: comment.line ?? null,
+    body: comment.body,
+  };
+}
+
 export function shapeThreads(response, unresolvedOnly = true) {
   if (response.errors?.length)
     throw new Error(
@@ -36,23 +76,15 @@ export function shapeThreads(response, unresolvedOnly = true) {
   return connection.nodes
     .filter((thread) => !unresolvedOnly || !thread.isResolved)
     .map((thread) => {
-      const comment = thread.comments?.nodes?.[0];
-      const rawId = comment?.fullDatabaseId;
-      const commentId =
-        typeof rawId === 'string' && /^[1-9]\d*$/.test(rawId)
-          ? Number(rawId)
-          : rawId;
-      if (!thread.id || !Number.isSafeInteger(commentId) || commentId <= 0)
+      if (!thread.id || !thread.comments?.nodes?.length)
         throw new Error(
           'GitHub returned a review thread without a root comment.',
         );
+      const comments = thread.comments.nodes.map(shapeComment);
       return {
         threadId: thread.id,
-        commentId,
-        author: comment.author?.login ?? null,
-        path: comment.path,
-        line: comment.line ?? null,
-        body: comment.body,
+        ...comments[0],
+        comments,
       };
     });
 }

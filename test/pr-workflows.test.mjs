@@ -6,11 +6,14 @@ import {
   fetchThreads,
   replyToThread,
   repository,
-  requireReviewApproval,
+  hasReviewApproval,
+  partitionReviewThreads,
+  permissionLookup,
 } from '../scripts/pr/github.mjs';
 import { address } from '../scripts/pr/address.mjs';
 import { sync } from '../scripts/pr/sync.mjs';
 import { loadLocalConfig } from '../scripts/harness/config.mjs';
+import { createReviewSnapshot } from '../scripts/pr/lib.mjs';
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -30,7 +33,9 @@ vi.mock('../scripts/pr/github.mjs', () => ({
   fetchThreads: vi.fn(),
   replyToThread: vi.fn(),
   repository: vi.fn(),
-  requireReviewApproval: vi.fn(),
+  hasReviewApproval: vi.fn(),
+  partitionReviewThreads: vi.fn(),
+  permissionLookup: vi.fn(),
 }));
 
 const ok = (stdout = '') => ({ ok: true, stdout, output: stdout });
@@ -62,7 +67,8 @@ let hasConflicts;
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('PR_GATE_IMAGE', `sha256:${'a'.repeat(64)}`);
-  loadLocalConfig.mockReturnValue({});
+  vi.stubEnv('REVIEW_BOT_LOGIN', 'review-bot');
+  loadLocalConfig.mockReturnValue({ reviewBotLogin: 'review-bot' });
   mergePending = false;
   mergeConflict = false;
   dirty = false;
@@ -72,6 +78,9 @@ beforeEach(() => {
   hasConflicts = false;
   repository.mockReturnValue({ name: 'repo', owner: { login: 'owner' } });
   fetchThreads.mockReturnValue(threads);
+  partitionReviewThreads.mockReturnValue({ trusted: [], untrusted: threads });
+  permissionLookup.mockReturnValue(vi.fn());
+  hasReviewApproval.mockReturnValue(true);
   gh.mockImplementation((args) => {
     if (args[0] === 'pr' && args[1] === 'view')
       return ok(
@@ -305,18 +314,20 @@ describe('address review workflow', () => {
     expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
     expect(run).not.toHaveBeenCalled();
     expect(replyToThread).not.toHaveBeenCalled();
-    expect(requireReviewApproval).not.toHaveBeenCalled();
+    expect(hasReviewApproval).not.toHaveBeenCalled();
   });
 
-  it('requires exact input approval before checkout, agents, gates or publication', () => {
-    requireReviewApproval.mockImplementation(() => {
-      throw new Error('Review input is not approved.');
-    });
-    expect(() => address(9)).toThrow(/not approved/);
-    expect(requireReviewApproval).toHaveBeenCalledWith(
+  it('excludes unapproved untrusted input before checkout, agents, gates or publication', () => {
+    hasReviewApproval.mockReturnValue(false);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    address(9);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('nothing to do'));
+    log.mockRestore();
+    expect(hasReviewApproval).toHaveBeenCalledWith(
       9,
       { name: 'repo', owner: { login: 'owner' } },
       expect.stringMatching(/^[a-f0-9]{64}$/),
+      expect.any(Function),
     );
     expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
     expect(runAgent).not.toHaveBeenCalled();
@@ -330,16 +341,133 @@ describe('address review workflow', () => {
       .mockReturnValueOnce(reply({ comments: [] }))
       .mockReturnValueOnce(reply(decisions));
     address(9);
-    expect(requireReviewApproval).toHaveBeenCalledTimes(1);
+    expect(hasReviewApproval).toHaveBeenCalledTimes(1);
     expect(fetchThreads).toHaveBeenCalledTimes(1);
     const checkoutIndex = gh.mock.calls.findIndex(
       ([args]) => args[0] === 'pr' && args[1] === 'checkout',
     );
-    expect(requireReviewApproval.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(hasReviewApproval.mock.invocationCallOrder[0]).toBeLessThan(
       gh.mock.invocationCallOrder[checkoutIndex],
     );
     for (const [options] of runAgent.mock.calls)
       expect(options.prompt).toContain(JSON.stringify(threads, null, 2));
+  });
+
+  it('runs trusted threads without approval or an approval snapshot', () => {
+    partitionReviewThreads.mockReturnValue({ trusted: threads, untrusted: [] });
+    address(9);
+    expect(hasReviewApproval).not.toHaveBeenCalled();
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(hasPush()).toBe(true);
+    expect(runAgent.mock.calls[0][0].prompt).toContain(
+      JSON.stringify(threads, null, 2),
+    );
+  });
+
+  it('includes approved untrusted threads alongside trusted threads in original order', () => {
+    partitionReviewThreads.mockReturnValue({
+      trusted: [threads[1]],
+      untrusted: [threads[0]],
+    });
+    address(9);
+    expect(hasReviewApproval).toHaveBeenCalledTimes(1);
+    expect(runAgent.mock.calls[0][0].prompt).toContain(
+      JSON.stringify(threads, null, 2),
+    );
+    expect(replyToThread.mock.calls.map((args) => args[2])).toEqual(threads);
+    expect(JSON.parse(writeFileSync.mock.calls[0][1]).threads).toEqual([
+      threads[0],
+    ]);
+  });
+
+  it('scopes the digest to untrusted threads and the PR head, excluding them from an unapproved mixed run', () => {
+    partitionReviewThreads.mockReturnValue({
+      trusted: [threads[0]],
+      untrusted: [threads[1]],
+    });
+    hasReviewApproval.mockReturnValue(false);
+    runAgent.mockReturnValue(reply({ comments: [decisions.comments[0]] }));
+    address(9);
+    const repo = { name: 'repo', owner: { login: 'owner' } };
+    const head = { headRefName: 'feature', headRefOid: 'original-sha' };
+    const input = createReviewSnapshot(repo, 9, head, [threads[1]]);
+    expect(writeFileSync.mock.calls[0][1]).toBe(input.text);
+    expect(hasReviewApproval.mock.calls[0][2]).toBe(input.digest);
+    expect(runAgent.mock.calls[0][0].prompt).not.toContain('Check this.');
+    expect(replyToThread).toHaveBeenCalledTimes(1);
+    expect(replyToThread.mock.calls[0][2]).toBe(threads[0]);
+    const changedTrusted = [
+      { ...threads[0], body: 'changed trusted text' },
+      threads[1],
+    ];
+    fetchThreads.mockReturnValue(changedTrusted);
+    partitionReviewThreads.mockReturnValue({
+      trusted: [changedTrusted[0]],
+      untrusted: [threads[1]],
+    });
+    currentHead = 'original-sha';
+    address(9);
+    expect(hasReviewApproval.mock.calls[1][2]).toBe(input.digest);
+    expect(
+      createReviewSnapshot(repo, 9, { ...head, headRefOid: 'new-head' }, [
+        threads[1],
+      ]).digest,
+    ).not.toBe(input.digest);
+  });
+
+  it('surfaces approval lookup errors before any agent or checkout', () => {
+    hasReviewApproval.mockImplementation(() => {
+      throw new Error('permission unavailable');
+    });
+    expect(() => address(9)).toThrow(/permission unavailable/);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
+  });
+
+  it('uses the environment reviewer login before local configuration', () => {
+    vi.stubEnv('REVIEW_BOT_LOGIN', 'environment-reviewer');
+    loadLocalConfig.mockReturnValue({ reviewBotLogin: 'local-reviewer' });
+    address(9, true);
+    expect(partitionReviewThreads.mock.calls[0][1]).toBe(
+      'environment-reviewer',
+    );
+    vi.unstubAllEnvs();
+    address(9, true);
+    expect(partitionReviewThreads.mock.calls[1][1]).toBe('local-reviewer');
+  });
+
+  it.each(['environment', 'local'])(
+    'normalizes a REST-style %s bot setting before classification',
+    (source) => {
+      vi.stubEnv(
+        'REVIEW_BOT_LOGIN',
+        source === 'environment' ? 'Review-Bot[bot]' : undefined,
+      );
+      loadLocalConfig.mockReturnValue({ reviewBotLogin: 'Review-Bot[bot]' });
+      address(9, true);
+      expect(partitionReviewThreads.mock.calls[0][1]).toBe('review-bot');
+    },
+  );
+
+  it.each([undefined, '', '<review-bot-login>', 'bot;command', 123])(
+    'rejects invalid review bot configuration %s before classification or execution',
+    (login) => {
+      vi.stubEnv('REVIEW_BOT_LOGIN', undefined);
+      loadLocalConfig.mockReturnValue({ reviewBotLogin: login });
+      expect(() => address(9, true)).toThrow(/REVIEW_BOT_LOGIN/);
+      expect(partitionReviewThreads).not.toHaveBeenCalled();
+      expect(hasReviewApproval).not.toHaveBeenCalled();
+      expect(runAgent).not.toHaveBeenCalled();
+      expect(gh).not.toHaveBeenCalledWith(['pr', 'checkout', '9']);
+      expect(hasPush()).toBe(false);
+    },
+  );
+
+  it('rejects an invalid environment override instead of falling back to valid local configuration', () => {
+    vi.stubEnv('REVIEW_BOT_LOGIN', '');
+    expect(() => address(9, true)).toThrow(/REVIEW_BOT_LOGIN/);
+    expect(partitionReviewThreads).not.toHaveBeenCalled();
+    expect(runAgent).not.toHaveBeenCalled();
   });
 
   it('rejects dirty trees, fork PRs, and agents changing HEAD', () => {

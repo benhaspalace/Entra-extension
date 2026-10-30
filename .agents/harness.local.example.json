@@ -1,5 +1,6 @@
 {
   "cli": "<agent-cli>",
+  "prGateImage": "sha256:<gate-image-id>",
   "forbiddenTerms": ["<term>"],
   "models": {
     "implement": "<implement-model-id>",
