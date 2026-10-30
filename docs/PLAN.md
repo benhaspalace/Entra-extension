@@ -85,6 +85,9 @@ Therefore:
 - **Phase 2 (later, behind an option, off by default):** best-effort inline badges in the
   Members grid by matching row text (UPN / display name) to the data the panel already
   loaded. If matching fails nothing is injected — the side panel remains the source of truth.
+  The [feasibility spike](INLINE_BADGES_SPIKE.md) records the current access limits
+  and required live-DOM checks. The grid's frame/origin and reachability are not yet
+  verified; implementation is blocked on that evidence.
 
 ## Authentication
 
