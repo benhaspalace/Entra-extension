@@ -255,6 +255,8 @@ npm run pr:reply -- 9 123456 "Declined: this behavior is intentional" --no-resol
 npm run pr:address -- 9 --dry-run
 npm run pr:address -- 9
 npm run pr:sync -- feature-branch base-branch
+npm run pr:request-review -- 9
+npm run pr:review-check -- 9
 ```
 
 `pr:comments` prints a JSON array of unresolved review threads, paging all GraphQL
@@ -313,15 +315,24 @@ thread to `addressComments`. The agent must finish with fenced JSON:
 }
 ```
 
-Every input ID must appear exactly once; actions are `fixed` or `declined`, and replies
+Every input ID must appear exactly once; actions are `fixed`, `partial`, or `declined`, and replies
 must be nonempty single lines. Invalid output is retried once, then the script fails
 without publishing. The gate is the isolated PR gate described above (the build,
 tests, lint, typecheck, and local text-policy checks), with up to two agent fix retries.
-Only after it passes does the script commit and push changes, then reply with the
-commit SHA and the agent's explanation. Only `fixed` threads are resolved.
-An all-declined run without changes replies using the current SHA without an empty
-commit or push. Reporting `fixed` without any changes is an error.
+Only after it passes does the script commit and push changes, request fresh reviews,
+then reply with
+`Fixed in <sha7>: <what changed>. <test added>.`,
+`Partly fixed in <sha7>: ...`, or `Declined: <reason, citing the decision/issue>.`
+The agent supplies the explanation, test description, or cited reason, not the prefix.
+Only `fixed` threads are resolved; partial and declined threads stay open.
+Declines are listed in the run summary for the owner.
+An all-declined run without changes replies without an empty commit or push.
+Reporting `fixed` or `partial` without any changes is an error.
 Failures leave local changes for inspection but do not publish replies before the push.
+After publication, a review-request failure does not prevent thread replies, and a
+reply or resolution failure does not prevent attempts on remaining threads. All such
+failures are reported together after every selected thread has been attempted;
+inspect posted replies before retrying.
 Dry-run reads GitHub and saves an ignored prompt/reply preview, but does not check out,
 edit code, invoke models, run the gate, commit, push, or reply.
 
@@ -331,11 +342,105 @@ is gated and committed before pushing. Conflicted files go to `implement` via th
 runner. Path-free staging preserves deletions already resolved with `git rm`.
 The isolated PR gate can request up to two fixes; if it still fails, the pending merge is
 aborted and nothing is pushed. An already-up-to-date branch is gated without agent
-fixes. The script leaves the head branch checked out. A push or GitHub reply failure
+fixes, push, or new review request. The script leaves the head branch checked out. A push or GitHub reply failure
 is reported explicitly; inspect the local commit/posted replies before retrying.
 
 Manual smoke check: `npm run pr:comments -- 9` should print `[]` while all review
 threads on PR #9 remain resolved.
+
+### Automated review protocol
+
+Configure `reviewTriggers` in the ignored local configuration as exactly two distinct
+single-line strings: code review, then security review. Configure `reviewStateMarker`
+to match the reviewer's hidden JSON marker. `REVIEW_TRIGGERS` (JSON array) and
+`REVIEW_STATE_MARKER` override these fields. The reviewer must be configured to
+review automatically only on PR opening/ready-for-review, not on push.
+`pr:request-review` posts both configured triggers with current-head request metadata.
+These explicit trusted control messages bypass the prose text policy, narrowly in
+that command; arbitrary replies still pass the normal policy.
+`pr:address` and `pr:sync` freeze this configuration before checkout/merge and request
+both reviews after a head-changing push, never for a no-op.
+After a push, review requests wait up to 30 seconds with backoff for GitHub's PR
+head to catch up. A head other than the previous or pushed SHA fails immediately;
+a timeout also fails without posting review triggers.
+
+The parser uses this explicit JSON contract (replace `configured-marker` with the
+local marker and `<sha40>` with the full lowercase head SHA). Unknown or malformed
+trusted state fails closed; ordinary prose saying "clean" is not a receipt.
+
+```text
+<!-- configured-marker:request {"headSha":"<sha40>","kind":"code"} -->
+<!-- configured-marker {"headSha":"<sha40>","reviews":{"code":{"status":"completed","clean":true,"requestId":101},"security":{"status":"completed","clean":true,"requestId":102}}} -->
+<!-- configured-marker:receipt {"headSha":"<sha40>","kind":"code","status":"completed","clean":true,"requestId":101} -->
+<!-- configured-marker:receipt {"headSha":"<sha40>","kind":"security","status":"completed","clean":true,"requestId":102} -->
+```
+
+Request markers follow their configured trigger separated by a blank line. The IDs
+are the GitHub conversation-comment IDs of those requests. Only User requests from
+the repository owner or current write/maintain/admin collaborators count. A newer
+authorized request invalidates earlier receipts even on the same head.
+Automatic opening reviews use `requestId: null` when there is no explicit request.
+Summary entries may be `pending`, `running`, or `failed`, but only `completed` with
+a boolean `clean` and matching receipt can pass. Summary and receipt authors must
+match the configured login **and** verified Bot type; matching text/logins alone
+are insufficient. The latest summary is authoritative, including a stale summary.
+If the review service's schema differs, update the adapter and fixtures before
+requiring the check; do not infer completion from unstructured text.
+
+`pr:review-check` exits **0** only when both current-head reviews have completed,
+every reviewer inline finding (including resolved threads) has a nonempty User
+reply, and GitHub reports an open, non-draft, mergeable PR. It exits **1** with
+reasons while pending, or **3** for owner/manual review at 30 minutes from an
+authorized incomplete request, or when the same normalized first-line title and
+file recur after a reply. All thread/comment/file pages are fetched. Security must
+also be clean for trust-surface changes, including renames away from those paths.
+Do not treat a declined thread as resolved or a pending check as success.
+
+The Review readiness workflow runs trusted default-branch scripts, never PR code,
+on PR changes and conversation-comment updates, and publishes `review-readiness`
+on the checked head. It needs no dependency installation or agent service credentials.
+Set repository variables `REVIEW_BOT_LOGIN`, `REVIEW_TRIGGERS`, and
+`REVIEW_STATE_MARKER` to the corresponding local values. After inline-only replies
+or to refresh a timeout, dispatch the workflow with the PR number (or add a PR
+conversation comment). No polling/review-on-push automation is enabled.
+
+### CI and releases
+
+`npm run ci` is the single local/CI validation entry point: manifest version and
+permission-decision checks, `verify`, then actionlint. A missing actionlint is an
+explicit local skip, never a CI skip. CI installs v1.7.7 after checking its pinned
+SHA256. Set `ACTIONLINT` to an installed executable when it is not on PATH.
+ShellCheck and pyflakes integrations are disabled for reproducible actionlint
+results across developer machines; actionlint itself remains required in CI.
+Full Git history and tags are required for permission comparisons.
+The first release is compared with an empty baseline; current-commit tags are
+excluded so a release cannot approve its own permission additions.
+Document exact grant additions and CSP changes in `docs/permissions-decisions.md`.
+
+All workflow actions use full commit pins with version comments, read-only default
+permissions, job timeouts, and credential-free checkout. CI/security checks use
+disposable hosted runners, including for forks, rather than executing PR code on
+a persistent self-hosted runner. Weekly dependency updates are grouped by ecosystem.
+
+Push a `v<package-version>` tag, or dispatch Release **on an existing matching tag**.
+The build job runs `npm ci`, `npm run ci`, and `npm run package`. Packaging writes
+`release/extension-<version>.zip` (dist contents at the ZIP root) and `SHA256SUMS`.
+The build job exposes its run/attempt-specific artifact name as an output. The
+protected publish job downloads that exact artifact even when only publish is
+retried, checks its checksum, then attaches it to the tag's GitHub release,
+replacing existing assets so partial uploads can be retried. It never checks out
+or rebuilds source. Release runs never cancel one another. Store API steps are clearly marked
+placeholders, not claims that a store upload happened.
+
+Owner setup (not performed by scripts):
+
+- Configure `store-publish` with required reviewers and restrict deployment to release tags.
+- Enable secret scanning and push protection in repository settings.
+- Require CI and `review-readiness` in a `main` branch ruleset; also require the security scanning jobs as appropriate.
+- Enforce owner-only merges for trust-surface PRs (`.github/**`, `AGENTS.md`, `.agents/**`,
+  `scripts/**`, `package.json`, `package-lock.json`, `manifest.json`). Never auto-merge these.
+- Verify the review service emits the configured marker/receipt contract and only auto-runs on opening/ready.
+- Provision Chrome Web Store/Edge Add-ons credentials and replace placeholders only after owner review.
 
 ## Labels
 

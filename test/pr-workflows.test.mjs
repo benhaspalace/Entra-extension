@@ -14,6 +14,9 @@ import { address } from '../scripts/pr/address.mjs';
 import { sync } from '../scripts/pr/sync.mjs';
 import { loadLocalConfig } from '../scripts/harness/config.mjs';
 import { createReviewSnapshot } from '../scripts/pr/lib.mjs';
+import { requestReview } from '../scripts/pr/request-review.mjs';
+
+vi.mock('../scripts/pr/request-review.mjs', () => ({ requestReview: vi.fn() }));
 
 vi.mock('node:fs', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -72,6 +75,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('PR_GATE_IMAGE', `sha256:${'a'.repeat(64)}`);
   vi.stubEnv('REVIEW_BOT_LOGIN', 'review-bot');
+  vi.stubEnv('REVIEW_TRIGGERS', '["request code","request security"]');
+  vi.stubEnv('REVIEW_STATE_MARKER', 'review-state:v1');
   loadLocalConfig.mockReturnValue({ reviewBotLogin: 'review-bot' });
   mergePending = false;
   mergeConflict = false;
@@ -86,6 +91,7 @@ beforeEach(() => {
   permissionLookup.mockReturnValue(vi.fn());
   hasReviewApproval.mockReturnValue(true);
   gh.mockImplementation((args) => {
+    if (args[0] === 'pr' && args[1] === 'list') return ok('[{"number":9}]');
     if (args[0] === 'pr' && args[1] === 'view')
       return ok(
         JSON.stringify({
@@ -180,7 +186,7 @@ describe('address review workflow', () => {
       9,
       expect.any(Object),
       threads[0],
-      'published-sha: Fixed the bug.',
+      'Fixed in publish: Fixed the bug.',
       true,
     );
     expect(replyToThread).toHaveBeenNthCalledWith(
@@ -188,12 +194,25 @@ describe('address review workflow', () => {
       9,
       expect.any(Object),
       threads[1],
-      'published-sha: The guard already handles this.',
+      'Declined: The guard already handles this.',
       false,
     );
     const pushIndex = git.mock.calls.findIndex(([args]) => args[0] === 'push');
     expect(git.mock.invocationCallOrder[pushIndex]).toBeLessThan(
       replyToThread.mock.invocationCallOrder[0],
+    );
+    expect(requestReview).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        expectedHead: 'published-sha',
+        previousHead: 'original-sha',
+        config: expect.objectContaining({
+          reviewTriggers: ['request code', 'request security'],
+        }),
+      }),
+    );
+    expect(git.mock.invocationCallOrder[pushIndex]).toBeLessThan(
+      requestReview.mock.invocationCallOrder[0],
     );
   });
 
@@ -267,9 +286,96 @@ describe('address review workflow', () => {
     });
     expect(() => address(9)).toThrow(/push rejected/);
     expect(replyToThread).not.toHaveBeenCalled();
+    expect(requestReview).not.toHaveBeenCalled();
+  });
+
+  it('still requests reviews for a changed head when posting a reply fails', () => {
+    replyToThread.mockImplementation(() => {
+      throw new Error('reply rejected');
+    });
+    expect(() => address(9)).toThrow(/reply rejected/);
+    expect(requestReview).toHaveBeenCalledTimes(1);
+    expect(hasPush()).toBe(true);
+  });
+
+  it.each(['PR head polling timed out', 'review-request POST rejected'])(
+    'still replies and resolves fixed threads when review requests fail: %s',
+    (message) => {
+      requestReview.mockImplementation(() => {
+        throw new Error(message);
+      });
+      expect(() => address(9)).toThrow(message);
+      expect(hasPush()).toBe(true);
+      expect(replyToThread).toHaveBeenCalledTimes(2);
+      expect(replyToThread.mock.calls[0]).toEqual([
+        9,
+        expect.any(Object),
+        threads[0],
+        'Fixed in publish: Fixed the bug.',
+        true,
+      ]);
+      expect(replyToThread.mock.calls[1]).toEqual([
+        9,
+        expect.any(Object),
+        threads[1],
+        'Declined: The guard already handles this.',
+        false,
+      ]);
+    },
+  );
+
+  it('attempts later threads after an earlier reply or resolution fails', () => {
+    replyToThread.mockImplementationOnce(() => {
+      throw new Error('reply or resolution rejected');
+    });
+    expect(() => address(9)).toThrow(
+      /Thread #123.*reply or resolution rejected/,
+    );
+    expect(replyToThread).toHaveBeenCalledTimes(2);
+    expect(replyToThread.mock.calls[1][2]).toBe(threads[1]);
+  });
+
+  it('reports all review-request and thread failures after attempting every thread', () => {
+    const reviewError = new Error('review request rejected');
+    const threadErrors = [
+      new Error('reply rejected'),
+      new Error('resolution rejected'),
+    ];
+    requestReview.mockImplementation(() => {
+      throw reviewError;
+    });
+    for (const error of threadErrors)
+      replyToThread.mockImplementationOnce(() => {
+        throw error;
+      });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      let failure;
+      try {
+        address(9);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(failure.errors.map((error) => error.cause)).toEqual([
+        reviewError,
+        ...threadErrors,
+      ]);
+      expect(failure.message).toMatch(/published-sha.*review request rejected/);
+      expect(failure.message).toMatch(
+        /#123.*reply rejected.*#125.*resolution rejected/,
+      );
+      expect(replyToThread).toHaveBeenCalledTimes(2);
+      expect(log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Addressed 2 review threads'),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('leaves declined-only threads open without creating an empty commit', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     changed = false;
     runAgent.mockReturnValue(
       reply({
@@ -287,7 +393,31 @@ describe('address review workflow', () => {
     expect(
       replyToThread.mock.calls.every((args) => args.at(-1) === false),
     ).toBe(true);
-    expect(replyToThread.mock.calls[0][3]).toContain('original-sha');
+    expect(replyToThread.mock.calls[0][3]).toBe('Declined: Fixed the bug.');
+    expect(requestReview).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      'Declined #125: The guard already handles this.',
+    );
+    log.mockRestore();
+  });
+
+  it('formats partial fixes and leaves their threads open for follow-up', () => {
+    runAgent.mockReturnValue(
+      reply({
+        comments: decisions.comments.map((comment) => ({
+          ...comment,
+          action: 'partial',
+        })),
+      }),
+    );
+    address(9);
+    expect(replyToThread.mock.calls[0][3]).toBe(
+      'Partly fixed in publish: Fixed the bug.',
+    );
+    expect(
+      replyToThread.mock.calls.every((args) => args.at(-1) === false),
+    ).toBe(true);
+    expect(requestReview).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a fixed decision with no changed files', () => {
@@ -295,6 +425,21 @@ describe('address review workflow', () => {
     expect(() => address(9)).toThrow(/produced no changes/);
     expect(replyToThread).not.toHaveBeenCalled();
     expect(hasPush()).toBe(false);
+  });
+
+  it('rejects a partial decision with no changed files', () => {
+    changed = false;
+    runAgent.mockReturnValue(
+      reply({
+        comments: decisions.comments.map((comment) => ({
+          ...comment,
+          action: 'partial',
+        })),
+      }),
+    );
+    expect(() => address(9)).toThrow(/produced no changes/);
+    expect(requestReview).not.toHaveBeenCalled();
+    expect(replyToThread).not.toHaveBeenCalled();
   });
 
   it('returns immediately if every thread is resolved', () => {
@@ -540,6 +685,13 @@ describe('stacked PR synchronization', () => {
     expect(gitCommands()).toContain('commit -m Merge origin/base into feature');
     expect(hasPush()).toBe(true);
     expect(runAgent).not.toHaveBeenCalled();
+    expect(requestReview).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        expectedHead: 'published-sha',
+        previousHead: 'original-sha',
+      }),
+    );
   });
 
   it('routes conflicted files to implement, gates, then commits and pushes', () => {
@@ -639,7 +791,8 @@ describe('stacked PR synchronization', () => {
     expect(gitCommands().some((command) => command.startsWith('commit'))).toBe(
       false,
     );
-    expect(hasPush()).toBe(true);
+    expect(hasPush()).toBe(false);
+    expect(requestReview).not.toHaveBeenCalled();
   });
 
   it('rejects option-like refs, matching branches, dirty trees, and stale local heads', () => {

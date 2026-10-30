@@ -1,0 +1,40 @@
+{
+  "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mergeable": "MERGEABLE",
+  "state": "OPEN",
+  "isDraft": false,
+  "files": ["src/shared/graph.ts"],
+  "threads": [],
+  "comments": [
+    {
+      "id": 101,
+      "user": { "login": "owner", "type": "User" },
+      "created_at": "2026-10-30T12:00:00Z",
+      "body": "request code\n\n<!-- review-state:v1:request {\"headSha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"code\"} -->"
+    },
+    {
+      "id": 102,
+      "user": { "login": "owner", "type": "User" },
+      "created_at": "2026-10-30T12:00:00Z",
+      "body": "request security\n\n<!-- review-state:v1:request {\"headSha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"security\"} -->"
+    },
+    {
+      "id": 103,
+      "user": { "login": "review-bot[bot]", "type": "Bot" },
+      "created_at": "2026-10-30T12:01:00Z",
+      "body": "<!-- review-state:v1 {\"headSha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"reviews\":{\"code\":{\"status\":\"completed\",\"clean\":true,\"requestId\":101},\"security\":{\"status\":\"completed\",\"clean\":true,\"requestId\":102}}} -->"
+    },
+    {
+      "id": 104,
+      "user": { "login": "review-bot[bot]", "type": "Bot" },
+      "created_at": "2026-10-30T12:01:00Z",
+      "body": "<!-- review-state:v1:receipt {\"headSha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"code\",\"status\":\"completed\",\"clean\":true,\"requestId\":101} -->"
+    },
+    {
+      "id": 105,
+      "user": { "login": "review-bot[bot]", "type": "Bot" },
+      "created_at": "2026-10-30T12:01:00Z",
+      "body": "<!-- review-state:v1:receipt {\"headSha\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"security\",\"status\":\"completed\",\"clean\":true,\"requestId\":102} -->"
+    }
+  ]
+}

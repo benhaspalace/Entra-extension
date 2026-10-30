@@ -9,6 +9,7 @@ import {
   parseAddressResult,
   parsePrArgs,
   shapeThreads,
+  addressReply,
 } from '../scripts/pr/lib.mjs';
 import { resolveModel } from '../scripts/harness/config.mjs';
 
@@ -343,6 +344,42 @@ describe('PR pure helpers', () => {
       '`$shell` "quoted" & text',
     );
     expect(() => formatReply(' ')).toThrow(/nonempty/);
+  });
+
+  it('formats fix, partial, and decline replies without adding credits', () => {
+    const sha = 'a'.repeat(40);
+    expect(
+      addressReply(
+        { action: 'fixed', reply: 'Added paging. Added a paging test.' },
+        sha,
+      ),
+    ).toBe('Fixed in aaaaaaa: Added paging. Added a paging test.');
+    expect(
+      addressReply(
+        { action: 'partial', reply: 'Added a guard. Coverage still pending.' },
+        sha,
+      ),
+    ).toBe('Partly fixed in aaaaaaa: Added a guard. Coverage still pending.');
+    expect(
+      addressReply(
+        { action: 'declined', reply: 'Intentional under docs/PLAN.md.' },
+        sha,
+      ),
+    ).toBe('Declined: Intentional under docs/PLAN.md.');
+    expect(
+      isAddressResult(
+        {
+          comments: [
+            {
+              commentId: 123,
+              action: 'partial',
+              reply: 'Added guard and test.',
+            },
+          ],
+        },
+        [123],
+      ),
+    ).toBe(true);
   });
 
   it('validates PR arguments and permits dry-run only where supported', () => {

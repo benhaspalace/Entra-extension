@@ -14,6 +14,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "verify": "npm run build && npm test && npm run lint && npm run typecheck && npm run check:terms",
+    "ci": "node scripts/ci.mjs",
+    "package": "node scripts/package.mjs",
+    "check:manifest": "node scripts/check-manifest.mjs",
     "check:terms": "node scripts/check-terms.mjs",
     "agent": "node scripts/harness/run.mjs",
     "agent:labels": "node scripts/harness/setup-labels.mjs",
@@ -21,6 +24,8 @@
     "pr:reply": "node scripts/pr/reply.mjs",
     "pr:address": "node scripts/pr/address.mjs",
     "pr:sync": "node scripts/pr/sync.mjs",
+    "pr:request-review": "node scripts/pr/request-review.mjs",
+    "pr:review-check": "node scripts/pr/review-check.mjs",
     "gate:image": "node scripts/pr/build-gate-image.mjs"
   },
   "devDependencies": {
@@ -29,6 +34,7 @@
     "@types/node": "^22.19.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
+    "fflate": "^0.8.2",
     "happy-dom": "^21.0.4",
     "jsdom": "^27.0.1",
     "prettier": "^3.6.2",

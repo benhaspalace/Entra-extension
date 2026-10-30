@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
-import { git } from '../harness/process.mjs';
+import { gh, git } from '../harness/process.mjs';
+import { requestReview } from './request-review.mjs';
+import { reviewSettings } from './review-config.mjs';
 import { createAgentRunner } from '../harness/agent.mjs';
 import {
   AGENT_RULES,
@@ -23,6 +25,7 @@ export function sync(branch, base) {
   requireClean();
   assertNoTrackedRuntimeFiles();
   const runner = createAgentRunner();
+  const reviewConfig = reviewSettings();
   git(['fetch', 'origin', '--', branch, base]);
   for (const ref of [branch, base])
     assertNoTrackedRuntimeFiles(`refs/remotes/origin/${ref}`);
@@ -99,7 +102,32 @@ Resolve conflict markers and stage the resolved files. Do not commit or abort th
     }
     throw error;
   }
-  git(['push', 'origin', `HEAD:refs/heads/${branch}`]);
+  const head = git(['rev-parse', 'HEAD']).stdout.trim();
+  if (head !== original.head) {
+    git(['push', 'origin', `HEAD:refs/heads/${branch}`]);
+    const prs = JSON.parse(
+      gh([
+        'pr',
+        'list',
+        '--head',
+        branch,
+        '--state',
+        'open',
+        '--json',
+        'number',
+      ]).stdout,
+    );
+    if (!Array.isArray(prs) || !prs.length)
+      throw new Error(
+        'Branch pushed, but no open PR found for review requests.',
+      );
+    for (const pr of prs)
+      requestReview(pr.number, {
+        config: reviewConfig,
+        expectedHead: head,
+        previousHead: original.head,
+      });
+  }
   console.log(`Synced ${branch} with origin/${base}.`);
 }
 
