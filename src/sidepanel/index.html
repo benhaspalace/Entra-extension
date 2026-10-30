@@ -23,15 +23,19 @@
       <select id="filter">
         <option value="all">All (including synced)</option>
         <option value="access-package">Access package</option>
+        <option value="pim">PIM (active / eligible)</option>
+        <option value="nested">Nested</option>
         <option value="manual">Manual</option>
         <option value="dynamic">Dynamic</option>
       </select>
       <p id="count"></p>
-      <ul id="rows" aria-label="Direct memberships"></ul>
+      <ul id="rows" aria-label="Memberships and PIM eligibilities"></ul>
       <p class="note">
-        Direct memberships only. Access packages take precedence over dynamic,
-        synced and manual labels. Audit history is evidence of a past addition,
-        not proof of the current membership's cause.
+        Includes direct and nested memberships, plus PIM eligibility-only rows
+        (not current membership). Direct membership takes precedence over
+        nested. For direct members, access packages take precedence over active
+        PIM, dynamic, synced and manual labels. Audit history is evidence of a
+        past addition, not proof of the current membership's cause.
       </p>
     </main>
     <script src="panel.js" defer></script>

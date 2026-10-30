@@ -12,6 +12,19 @@ export interface Group extends DirectoryObject {
   onPremisesSyncEnabled?: boolean | null;
 }
 
+export interface PimInstance {
+  id: string;
+  groupId: string;
+  principalId: string;
+  accessId: string;
+  startDateTime: string;
+  endDateTime: string | null;
+  assignmentType?: string;
+  principal?: DirectoryObject | null;
+  group?: Group | null;
+  status: 'active' | 'eligible';
+}
+
 export interface AccessPackage {
   id: string;
   displayName: string;

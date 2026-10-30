@@ -22,6 +22,14 @@ interface Page<T> {
   '@odata.nextLink'?: string;
 }
 
+function needsEventualConsistency(url: string): boolean {
+  const parsed = new URL(url);
+  return (
+    parsed.pathname.includes('/microsoft.graph.') ||
+    parsed.searchParams.get('$count') === 'true'
+  );
+}
+
 export function graphUrl(path: string): string {
   const url = new URL(path.startsWith('/') ? `${ROOT}${path}` : path);
   if (
@@ -82,6 +90,7 @@ export function createGraphClient(
     path: string,
     scope: string,
     signal?: AbortSignal,
+    eventual = false,
   ): Promise<T> {
     const url = graphUrl(path);
     signal?.throwIfAborted();
@@ -93,7 +102,7 @@ export function createGraphClient(
       const response = await fetcher(url, {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...(new URL(url).pathname.includes('/microsoft.graph.')
+          ...(eventual || needsEventualConsistency(url)
             ? { ConsistencyLevel: 'eventual' }
             : {}),
         },
@@ -137,13 +146,19 @@ export function createGraphClient(
   ): Promise<T[]> {
     const values: T[] = [];
     const visited = new Set<string>();
+    const eventual = needsEventualConsistency(graphUrl(path));
     let next: string | undefined = path;
     while (next) {
       const url = graphUrl(next);
       if (visited.has(url))
         throw new Error('Microsoft Graph returned a paging loop.');
       visited.add(url);
-      const page: Page<T> = await graphFetch<Page<T>>(url, scope, signal);
+      const page: Page<T> = await graphFetch<Page<T>>(
+        url,
+        scope,
+        signal,
+        eventual,
+      );
       if (
         !Array.isArray(page.value) ||
         (page['@odata.nextLink'] !== undefined &&

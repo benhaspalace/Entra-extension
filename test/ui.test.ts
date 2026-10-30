@@ -40,7 +40,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function setupPanel(signedIn = true, auditEnabled = true) {
+async function setupPanel(
+  signedIn = true,
+  auditEnabled = true,
+  extended = false,
+) {
   await loadPage('sidepanel');
   const session = storageArea({
     auth: { sessionId: 'session' },
@@ -92,6 +96,36 @@ async function setupPanel(signedIn = true, auditEnabled = true) {
   let auditStatus = 200;
   const fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = new URL(String(input));
+    if (extended && url.pathname.endsWith('/transitiveMembers'))
+      return json({
+        value: [
+          { id: 'packaged-user' },
+          { id: 'nested', displayName: '<img src=x onerror=alert(1)>' },
+        ],
+      });
+    if (extended && url.pathname.endsWith('ScheduleInstances')) {
+      const eligible = url.pathname.endsWith('/eligibilityScheduleInstances');
+      const principalId = eligible ? 'eligible' : 'manual-7';
+      return json({
+        value: [
+          {
+            id: 'pim-schedule',
+            groupId: GROUP,
+            principalId,
+            accessId: 'member',
+            assignmentType: 'activated',
+            startDateTime: '2020-01-01T00:00:00Z',
+            endDateTime: null,
+            principal: { id: principalId, displayName: 'Eligible principal' },
+          },
+        ],
+      });
+    }
+    if (
+      url.pathname.endsWith('/transitiveMembers') ||
+      url.pathname.endsWith('ScheduleInstances')
+    )
+      return json({ value: [] });
     if (url.pathname.endsWith(`/groups/${GROUP}`))
       return json({ id: GROUP, displayName: 'Test group' });
     if (url.pathname.endsWith(`/groups/${OTHER}`))
@@ -181,6 +215,41 @@ function chooseFilter(value: string): void {
 }
 
 describe('side panel DOM', () => {
+  it('renders and filters PIM active/eligible and nested rows without manual audit controls', async () => {
+    await setupPanel(true, true, true);
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll('.row')).toHaveLength(11),
+    );
+    chooseFilter('pim');
+    expect(document.querySelectorAll('.row')).toHaveLength(2);
+    expect(document.getElementById('rows')?.textContent).toContain(
+      'PIM (active)',
+    );
+    expect(document.getElementById('rows')?.textContent).toContain(
+      'PIM (eligible only)',
+    );
+    expect(document.getElementById('rows')?.textContent).toContain(
+      'eligibility alone does not grant membership',
+    );
+    expect(document.getElementById('rows')?.textContent).toContain(
+      'Activated from',
+    );
+    expect(document.querySelectorAll('#rows button')).toHaveLength(0);
+    chooseFilter('nested');
+    expect(document.querySelectorAll('.row')).toHaveLength(1);
+    expect(document.getElementById('rows')?.textContent).toContain(
+      'Indirect membership through a nested group',
+    );
+    expect(document.querySelectorAll('#rows button, #rows img')).toHaveLength(
+      0,
+    );
+    chooseFilter('manual');
+    expect(document.querySelectorAll('.row')).toHaveLength(7);
+    expect(document.getElementById('count')?.textContent).toBe(
+      '7 of 11 memberships / eligibilities',
+    );
+  });
+
   it('shows sign-in state, renders safe package links and supports filters/sign-out', async () => {
     const app = await setupPanel(false);
     await vi.waitFor(() =>

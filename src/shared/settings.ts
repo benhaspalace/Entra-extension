@@ -46,6 +46,8 @@ export function authScopes(settings: Settings): string {
     'https://graph.microsoft.com/User.Read',
     'https://graph.microsoft.com/GroupMember.Read.All',
     'https://graph.microsoft.com/EntitlementManagement.Read.All',
+    'https://graph.microsoft.com/PrivilegedAssignmentSchedule.Read.AzureADGroup',
+    'https://graph.microsoft.com/PrivilegedEligibilitySchedule.Read.AzureADGroup',
     ...(settings.auditEnabled
       ? ['https://graph.microsoft.com/AuditLog.Read.All']
       : []),
