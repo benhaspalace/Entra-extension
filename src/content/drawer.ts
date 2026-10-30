@@ -1,11 +1,12 @@
 import {
   formatDate,
   formatExpiration,
+  formatRequestor,
   groupAssignments,
 } from '../shared/accessPackages';
 import { memberLink, packageLink } from '../shared/links';
 import { errorMessage, request } from '../shared/messages';
-import type { UserPackageAssignment } from '../shared/types';
+import type { AssignmentRequest, UserPackageAssignment } from '../shared/types';
 
 const STYLES = `
 :host { all: initial; position: fixed; inset: 0 0 0 auto; width: min(520px, 100vw);
@@ -75,6 +76,19 @@ export interface Drawer {
   close(): void;
 }
 
+function requestRow(request: AssignmentRequest): HTMLElement {
+  const row = document.createElement('article');
+  const pkg = request.accessPackage;
+  row.append(
+    pkg
+      ? link(pkg.displayName ?? pkg.id, packageLink(pkg.id))
+      : text('p', 'Access package not provided'),
+    text('p', `Requested: ${formatDate(request.createdDateTime)}`),
+    text('p', `Requestor: ${formatRequestor(request.requestor)}`),
+  );
+  return row;
+}
+
 export function openDrawer(userId: string, returnFocus: HTMLElement): Drawer {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'closed' });
@@ -117,7 +131,7 @@ export function openDrawer(userId: string, returnFocus: HTMLElement): Drawer {
     refresh.disabled = true;
     content.replaceChildren();
     status.setAttribute('role', 'status');
-    status.textContent = 'Loading access package assignments...';
+    status.textContent = 'Loading access package assignments and requests...';
     try {
       const data = await request('getUserAccessPackages', { userId });
       if (closed || current !== version) return;
@@ -132,9 +146,23 @@ export function openDrawer(userId: string, returnFocus: HTMLElement): Drawer {
         for (const assignment of assignments)
           content.append(assignmentRow(assignment));
       }
-      status.textContent = data.assignments.length
-        ? `${data.assignments.length} assignments. Dates are UTC.`
-        : 'No access package assignments';
+      content.append(text('h2', 'Pending requests'));
+      if (data.pendingRequestsError) {
+        const error = text(
+          'p',
+          `Could not load pending requests: ${data.pendingRequestsError} Use Refresh to retry.`,
+        );
+        error.setAttribute('role', 'alert');
+        content.append(error);
+      } else if (!data.pendingRequests.length)
+        content.append(text('p', 'No pending requests'));
+      for (const pendingRequest of data.pendingRequests)
+        content.append(requestRow(pendingRequest));
+      status.textContent = data.pendingRequests.length
+        ? `${data.assignments.length} assignments. ${data.pendingRequests.length} pending requests. Dates are UTC.`
+        : data.assignments.length
+          ? `${data.assignments.length} assignments. Dates are UTC.`
+          : 'No access package assignments';
     } catch (error) {
       if (!closed && current === version) showError(error);
     } finally {

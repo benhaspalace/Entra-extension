@@ -232,6 +232,7 @@ describe('background message trust boundary', () => {
           value: {
             userId: USER,
             displayName: 'User',
+            pendingRequests: [],
             assignments: [
               {
                 id: 'assignment',
