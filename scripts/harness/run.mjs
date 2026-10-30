@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { runAgent } from './agent.mjs';
 import { loadConfig, resolveModel } from './config.mjs';
 import { run, gh, git } from './process.mjs';
+import { checkChanges } from './change-guard.mjs';
 import { assertClean, redactEnvironmentPaths, stopComment } from './terms.mjs';
 import {
   approvalDigest,
@@ -71,6 +72,9 @@ function agent(role, task, prompt, { readOnly }) {
 function gate() {
   log(`gate: ${config.gate.join(' && ')}`);
   if (options.dryRun) return { ok: true, output: '' };
+  const changes = checkChanges(baseCommit, approvedIssue);
+  assertClean('Change guard output', changes.output);
+  if (!changes.ok) return changes;
   for (const command of config.gate) {
     const [bin, ...args] = command.split(' ');
     const result = run(bin, args, { allowFail: true, shell: true });
@@ -189,6 +193,7 @@ const comments = JSON.parse(
   ]).stdout,
 ).flat();
 const snapshot = createIssueSnapshot(issue, comments);
+const approvedIssue = { title: issue.title, body: issue.body };
 const snapshotPath = join(TMP, `issue-${issue.number}-input.json`);
 writeFileSync(snapshotPath, snapshot.text);
 log(`issue #${issue.number} input: ${snapshotPath}`);
@@ -224,6 +229,7 @@ if (!options.dryRun && git(['status', '--porcelain']).stdout.trim())
     'Working tree is not clean; commit or set aside changes first.',
   );
 const base = git(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim();
+const baseCommit = git(['rev-parse', 'HEAD']).stdout.trim();
 const branch = `agent/issue-${issue.number}`;
 if (!options.dryRun) git(['switch', '-c', branch]);
 setStatus(issue.number, config.labels.status.inProgress);
