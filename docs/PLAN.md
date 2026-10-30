@@ -68,12 +68,19 @@ Drawer contents for the user:
   (groups as hyperlinks, from the cached package → resource map of feature 1).
 - **Pending requests**: package hyperlink, requested date (`createdDateTime`, UTC),
   and requestor (display name, falling back to principal name, email or object ID).
-  Load `GET /identityGovernance/entitlementManagement/assignmentRequests?$filter=state eq 'pendingApproval'&$expand=accessPackage,assignment($expand=target),requestor`
+  Load `GET /identityGovernance/entitlementManagement/assignmentRequests?$filter=state eq 'pendingApproval'&$expand=accessPackage,assignment,requestor`
   using the existing paged Graph client and `EntitlementManagement.Read.All`.
   The [v1.0 request resource](https://learn.microsoft.com/en-us/graph/api/resources/accesspackageassignmentrequest?view=graph-rest-1.0)
   documents the `state` filter as **eq-only**; the
   [list API](https://learn.microsoft.com/en-us/graph/api/entitlementmanagement-list-assignmentrequests?view=graph-rest-1.0)
-  documents these expansions. Match `assignment.target.objectId` to the drawer user
+  documents these top-level expansions, not a nested target expansion. When the
+  assignment lacks `target.objectId`, resolve its recipient with
+  `GET /identityGovernance/entitlementManagement/assignments/{assignmentId}?$expand=target`,
+  as documented by the
+  [v1.0 get assignment API](https://learn.microsoft.com/en-us/graph/api/accesspackageassignment-get?view=graph-rest-1.0).
+  Reuse recipient lookups for repeated assignment IDs within the load. Missing
+  assignment IDs, missing resolved recipients, and lookup failures are section
+  errors, never successful empty results. Match `assignment.target.objectId` to the drawer user
   client-side, not `requestor.objectId` (requests can be made on behalf of others).
   Do not assume an undocumented user-target filter on requests. Show "No pending
   requests" only after a successful empty query. Pending-request queries are optional:

@@ -24,13 +24,42 @@ export async function loadUserAccessPackages(
     ),
     graph
       .list<AssignmentRequest>(
-        `${ENTITLEMENTS}/assignmentRequests?$filter=${encodeURIComponent("state eq 'pendingApproval'")}&$expand=accessPackage,assignment($expand=target),requestor`,
+        `${ENTITLEMENTS}/assignmentRequests?$filter=${encodeURIComponent("state eq 'pendingApproval'")}&$expand=accessPackage,assignment,requestor`,
         PACKAGE_SCOPE,
         signal,
       )
-      .then((requests) => ({
-        pendingRequests: pendingRequestsForUser(requests, userId),
-      }))
+      .then(async (requests) => {
+        const targets = new Map<string, Assignment['target']>();
+        const resolved: AssignmentRequest[] = [];
+        for (const request of requests) {
+          if (request.state !== 'pendingApproval') continue;
+          if (request.assignment?.target?.objectId) {
+            resolved.push(request);
+            continue;
+          }
+          const assignmentId = request.assignment?.id;
+          if (!assignmentId)
+            throw new Error(
+              'Microsoft Graph omitted a pending request assignment ID; its recipient could not be resolved.',
+            );
+          if (!targets.has(assignmentId)) {
+            const assignment = await graph.graphFetch<Assignment>(
+              `${ENTITLEMENTS}/assignments/${encodeURIComponent(assignmentId)}?$expand=target`,
+              PACKAGE_SCOPE,
+              signal,
+            );
+            targets.set(assignmentId, assignment.target);
+          }
+          resolved.push({
+            ...request,
+            assignment: {
+              ...request.assignment,
+              target: targets.get(assignmentId) ?? null,
+            },
+          });
+        }
+        return { pendingRequests: pendingRequestsForUser(resolved, userId) };
+      })
       .catch((error: unknown) => ({
         pendingRequests: [],
         pendingRequestsError: errorMessage(error),

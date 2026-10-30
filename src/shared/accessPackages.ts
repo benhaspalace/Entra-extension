@@ -16,12 +16,15 @@ export function pendingRequestsForUser(
   requests: readonly AssignmentRequest[],
   userId: string,
 ): AssignmentRequest[] {
-  return requests.filter(
-    (request) =>
-      request.state === 'pendingApproval' &&
-      request.assignment?.target?.objectId?.toLowerCase() ===
-        userId.toLowerCase(),
-  );
+  return requests.filter((request) => {
+    if (request.state !== 'pendingApproval') return false;
+    const recipientId = request.assignment?.target?.objectId;
+    if (!recipientId)
+      throw new Error(
+        'Microsoft Graph omitted a pending request recipient; pending requests could not be determined.',
+      );
+    return recipientId.toLowerCase() === userId.toLowerCase();
+  });
 }
 
 export function formatRequestor(

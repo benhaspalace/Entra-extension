@@ -58,6 +58,7 @@ export interface AssignmentRequest {
   createdDateTime?: string | null;
   accessPackage?: Assignment['accessPackage'] | null;
   assignment?: {
+    id?: string;
     target?: { objectId?: string | null; displayName?: string | null } | null;
   } | null;
   requestor?: {

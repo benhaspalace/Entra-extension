@@ -35,18 +35,6 @@ describe('assignment presentation helpers', () => {
           assignment: { target: { objectId: 'user' } },
         }),
       ),
-      { id: 'missing-assignment', state: 'pendingApproval' },
-      { id: 'null-assignment', state: 'pendingApproval', assignment: null },
-      {
-        id: 'missing-target',
-        state: 'pendingApproval',
-        assignment: {},
-      },
-      {
-        id: 'null-object-id',
-        state: 'pendingApproval',
-        assignment: { target: { objectId: null } },
-      },
       {
         id: 'self',
         state: 'pendingApproval',
@@ -61,6 +49,32 @@ describe('assignment presentation helpers', () => {
     expect(requests).toEqual(before);
     expect(pendingRequestsForUser([], 'user')).toEqual([]);
   });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { target: null },
+    { target: {} },
+    { target: { objectId: null } },
+    { target: { objectId: '' } },
+  ])(
+    'rejects unresolved recipients instead of reporting no pending requests (%j)',
+    (assignment) => {
+      expect(() =>
+        pendingRequestsForUser(
+          [
+            {
+              id: 'unresolved',
+              state: 'pendingApproval',
+              ...(assignment === undefined ? {} : { assignment }),
+            },
+          ],
+          'user',
+        ),
+      ).toThrow('recipient');
+    },
+  );
 
   it('formats requestor names with explicit fallbacks for missing details', () => {
     expect(
@@ -182,7 +196,7 @@ describe('user access package data', () => {
           "state eq 'pendingApproval'",
         );
         expect(url.searchParams.get('$expand')).toBe(
-          'accessPackage,assignment($expand=target),requestor',
+          'accessPackage,assignment,requestor',
         );
         return json({
           value: [
@@ -365,6 +379,142 @@ describe('user access package data', () => {
     expect(data.assignments).toEqual([]);
     expect(data.pendingRequests.map((r) => r.id)).toEqual(['pending']);
   });
+
+  it('resolves recipients through documented assignment lookups and reuses repeated IDs', async () => {
+    const chrome = mockChrome();
+    chrome.session.values.packageCache = {
+      sessionId: 'session',
+      expiresAt: Date.now() + 60_000,
+      packages: [],
+    };
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      expect(init?.signal).toBe(signal);
+      if (url.pathname.endsWith('/assignments')) return json({ value: [] });
+      if (url.pathname.endsWith('/assignmentRequests')) {
+        expect(url.searchParams.get('$expand')).toBe(
+          'accessPackage,assignment,requestor',
+        );
+        return json({
+          value: [
+            {
+              id: 'on-behalf',
+              state: 'pendingApproval',
+              assignment: { id: 'recipient-assignment' },
+              requestor: { objectId: 'admin' },
+            },
+            {
+              id: 'repeat',
+              state: 'pendingApproval',
+              assignment: { id: 'recipient-assignment', target: null },
+            },
+            {
+              id: 'other-recipient',
+              state: 'pendingApproval',
+              assignment: { id: 'other-assignment' },
+              requestor: { objectId: 'user' },
+            },
+            { id: 'denied', state: 'denied' },
+          ],
+        });
+      }
+      expect(url.searchParams.get('$expand')).toBe('target');
+      if (url.pathname.endsWith('/assignments/recipient-assignment'))
+        return json({
+          id: 'recipient-assignment',
+          target: { objectId: 'USER', displayName: 'Recipient' },
+        });
+      if (url.pathname.endsWith('/assignments/other-assignment'))
+        return json({
+          id: 'other-assignment',
+          target: { objectId: 'other' },
+        });
+      throw new Error(`Unexpected Graph call: ${url.href}`);
+    });
+    const signal = new AbortController().signal;
+    const data = await loadUserAccessPackages(
+      'user',
+      createGraphClient(async () => 'token', fetcher),
+      'session',
+      signal,
+    );
+    expect(data.displayName).toBe('Recipient');
+    expect(data.pendingRequests.map((r) => r.id)).toEqual([
+      'on-behalf',
+      'repeat',
+    ]);
+    expect(data.pendingRequests[0]?.requestor?.objectId).toBe('admin');
+    expect(data.pendingRequestsError).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['missing assignment', undefined, {}, 200, 'assignment ID'],
+    ['missing assignment ID', {}, {}, 200, 'assignment ID'],
+    ['missing target', { id: 'unresolved' }, {}, 200, 'recipient'],
+    ['null target', { id: 'unresolved' }, { target: null }, 200, 'recipient'],
+    [
+      'missing object ID',
+      { id: 'unresolved' },
+      { target: {} },
+      200,
+      'recipient',
+    ],
+    [
+      'denied lookup',
+      { id: 'unresolved' },
+      {},
+      403,
+      'EntitlementManagement.Read.All',
+    ],
+    ['deleted assignment', { id: 'unresolved' }, {}, 404, '404'],
+  ] as const)(
+    'preserves assignment sections and reports %s rather than a false empty or partial result',
+    async (_name, assignment, lookup, status, message) => {
+      const chrome = mockChrome();
+      chrome.session.values.packageCache = {
+        sessionId: 'session',
+        expiresAt: Date.now() + 60_000,
+        packages: [],
+      };
+      const fetcher = vi.fn<typeof fetch>(async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path.endsWith('/assignments'))
+          return json({
+            value: [
+              { id: 'active', state: 'delivered' },
+              { id: 'inactive', state: 'expired' },
+            ],
+          });
+        if (path.endsWith('/assignmentRequests'))
+          return json({
+            value: [
+              {
+                id: 'resolved',
+                state: 'pendingApproval',
+                assignment: { target: { objectId: 'user' } },
+              },
+              { id: 'unresolved', state: 'pendingApproval', assignment },
+            ],
+          });
+        if (path.endsWith('/assignments/unresolved'))
+          return json(lookup, status);
+        throw new Error(`Unexpected Graph call: ${path}`);
+      });
+      const data = await loadUserAccessPackages(
+        'user',
+        createGraphClient(async () => 'token', fetcher),
+        'session',
+        new AbortController().signal,
+      );
+      expect(data.assignments.map((a) => a.id)).toEqual(['active', 'inactive']);
+      expect(data.pendingRequests).toEqual([]);
+      expect(data.pendingRequestsError).toContain(message);
+      expect(fetcher).toHaveBeenCalledTimes(
+        assignment && 'id' in assignment ? 3 : 2,
+      );
+    },
+  );
 
   it.each([
     [400, false],
