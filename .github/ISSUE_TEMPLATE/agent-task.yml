@@ -1,0 +1,30 @@
+name: Agent task
+description: Work item an implementation agent can pick up.
+labels: ["triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true when this is done, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkable bullets. The agent treats these as the definition of done.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: pointers
+    attributes:
+      label: Pointers
+      description: Files, Graph endpoints, docs links, or things already ruled out.
+  - type: textarea
+    id: manual
+    attributes:
+      label: Manual verification
+      description: Anything that can only be checked in a live Entra tenant.

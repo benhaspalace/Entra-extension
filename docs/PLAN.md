@@ -173,7 +173,9 @@ docs/SETUP.md              app registration + load unpacked instructions
 - Implementation agent: an agent CLI working in this repo against this plan and `AGENTS.md`.
 - Review agent: a second, read-only agent run on a different model, reviewing the diff
   against this plan.
-- An orchestrator verifies (build, lint, tests) and fixes what the agents miss.
+- The orchestrator only runs scripts and reads their results. Scripts run the quality
+  gate and route implementation, reviews, comment fixes, and conflict resolution to
+  agents through the shared harness runner (see `docs/HARNESS.md`).
 
 ## Out of scope for phase 1 / backlog
 
