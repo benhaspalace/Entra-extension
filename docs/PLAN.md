@@ -18,12 +18,37 @@ A member can be both access-package governed **and** manually added (e.g. added 
 hand before the package existed). Access package always wins as the primary label; the
 audit lookup is only performed for members without a package (or on demand).
 
+### PIM for Groups and nested membership (issue #7)
+
+The existing side-panel / own PKCE / Graph v1.0 architecture is unchanged.
+Both views now include direct and transitive memberships, plus current PIM
+eligibility-only rows. The pure classifier adds `pim` and `nested` sources:
+
+- Compare complete, paged direct and transitive collections by case-insensitive
+  object ID. Direct membership wins when present in both; only transitive-only
+  relationships are `nested`. Their explanation says membership is indirect;
+  intermediate group paths are not resolved. Do not attribute a parent's package,
+  dynamic rule, sync or PIM schedule directly to a nested member.
+- For direct memberships, precedence is access package, active PIM, dynamic,
+  synced, manual. PIM membership requires a matching group/principal, `accessId`
+  equal to `member`, and `startDateTime <= now < endDateTime` (null end is
+  non-expiring). Both `assigned` and `activated` instances count; owner schedules,
+  future/expired schedules and malformed dates do not.
+- Eligibility is not membership. Include current member eligibilities absent from
+  both membership collections as `pim` / `eligible` rows, explicitly labelled
+  "eligible only". Existing member rows retain their current source and show
+  eligibility as supplementary context. An active schedule alone does not invent
+  a membership absent from Graph's membership collections. No audit lookups run
+  for nested or eligibility-only rows.
+- PIM and transitive read failures stop the list with an explicit error, rather
+  than silently producing incomplete results or a false Manual label.
+
 Two entry points, both derived from the current Entra URL:
 
 1. **Group → Members** blade (`.../GroupDetailsMenuBlade/~/Members/groupId/<guid>`): list
-   all direct members with their governance source.
+   direct/nested members and PIM eligibilities with their governance source.
 2. **User → Groups** blade (`.../UserProfileMenuBlade/~/Groups/userId/<guid>`): list all
-   groups the user is a direct member of, with the governance source for each.
+   direct/nested groups and PIM eligibilities, with the governance source for each.
 
 ## Feature 2: "Access packages" item in the user profile menu
 
@@ -96,7 +121,8 @@ first-party apps and live in other origins' storage). It signs in on its own:
   - Platform: _Single-page application_, redirect URI `https://<extension-id>.chromiumapp.org/`
   - Delegated Graph permissions: `User.Read`, `GroupMember.Read.All`,
     `EntitlementManagement.Read.All`, `AuditLog.Read.All` (audit is optional — the feature
-    degrades gracefully without it), admin consent granted.
+    degrades gracefully without it), `PrivilegedAssignmentSchedule.Read.AzureADGroup`,
+    `PrivilegedEligibilitySchedule.Read.AzureADGroup`, admin consent granted.
 - Tenant ID + client ID are entered in the options page (`chrome.storage.sync`).
 - Tokens are kept in `chrome.storage.session` only (memory-backed, cleared on browser
   restart), refreshed with the refresh token, never written to `storage.local`.
@@ -131,6 +157,24 @@ For the **User → Groups** view: fetch the title using
 `GET /users/{id}/memberOf/microsoft.graph.group?$select=...`,
 `GET .../assignments?$filter=target/objectId eq '{userId}' and (state eq 'delivered' or state eq 'partiallyDelivered' or state eq 'delivering')&$expand=accessPackage`
 and the cached package→group map from (3).
+
+Additional calls for issue #7 (all paged):
+
+- Group view: `GET /groups/{id}/transitiveMembers?$select=id,displayName,userPrincipalName,mail&$top=999&$count=true`.
+- User view: `GET /users/{id}/transitiveMemberOf/microsoft.graph.group?$select=id,displayName,groupTypes,membershipRule,onPremisesSyncEnabled&$count=true`.
+- Both `GET /identityGovernance/privilegedAccess/group/assignmentScheduleInstances`
+  and `GET /identityGovernance/privilegedAccess/group/eligibilityScheduleInstances`,
+  using `$filter=groupId eq '{id}'&$expand=principal` in the group view or
+  `$filter=principalId eq '{id}'&$expand=group` in the user view. Expansions supply
+  eligibility-only row names; unavailable names fall back to IDs.
+- Transitive queries use `ConsistencyLevel: eventual` and `$count=true`; direct
+  results are retained even if the transitive index lags. Group reads use
+  `GroupMember.Read.All`; the PIM endpoints use their respective read scopes above.
+
+API contracts: [assignment instances](https://learn.microsoft.com/en-us/graph/api/privilegedaccessgroup-list-assignmentscheduleinstances?view=graph-rest-1.0),
+[eligibility instances](https://learn.microsoft.com/en-us/graph/api/privilegedaccessgroup-list-eligibilityscheduleinstances?view=graph-rest-1.0),
+[transitive members](https://learn.microsoft.com/en-us/graph/api/group-list-transitivemembers?view=graph-rest-1.0),
+and [transitive groups](https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0).
 
 All calls go through one `graphFetch` helper: auth header, `@odata.nextLink` paging,
 429/503 retry honouring `Retry-After` up to 60 seconds (longer waits throw a throttling
@@ -180,6 +224,6 @@ docs/SETUP.md              app registration + load unpacked instructions
 ## Out of scope for phase 1 / backlog
 
 - Inline badges in the portal grid (phase 2).
-- PIM for Groups (eligible/active assignments), nested/transitive membership explanation.
+- Intermediate nested-group path resolution and PIM activation/write operations.
 - Firefox build (needs `browser.identity` redirect URL differences).
 - Access reviews / lifecycle workflow attribution.

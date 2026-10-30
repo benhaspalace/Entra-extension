@@ -1,4 +1,4 @@
-import type { AccessPackage, Assignment, Group } from './types';
+import type { AccessPackage, Assignment, Group, PimInstance } from './types';
 
 export interface PackageGrant {
   id: string;
@@ -11,12 +11,31 @@ export interface PackageGrant {
 
 export type Governance =
   | { source: 'access-package'; packages: PackageGrant[] }
+  | { source: 'pim'; status: 'active' | 'eligible'; instances: PimInstance[] }
+  | { source: 'nested' }
   | { source: 'dynamic'; rule: string }
   | { source: 'synced' }
   | { source: 'manual' };
 
 const sameId = (left: string | undefined, right: string) =>
   left?.toLowerCase() === right.toLowerCase();
+
+export function isCurrentPimMember(
+  instance: PimInstance,
+  now: number,
+): boolean {
+  return (
+    instance.accessId === 'member' &&
+    Date.parse(instance.startDateTime) <= now &&
+    (instance.endDateTime === null || Date.parse(instance.endDateTime) > now)
+  );
+}
+
+export interface MembershipEvidence {
+  membership: 'direct' | 'nested' | 'eligible';
+  pim: readonly PimInstance[];
+  now: number;
+}
 
 export const ACTIVE_ASSIGNMENT_STATES = [
   'delivered',
@@ -48,7 +67,23 @@ export function classifyGovernance(
   memberId: string,
   packages: readonly AccessPackage[],
   assignments: readonly Assignment[],
+  evidence?: MembershipEvidence,
 ): Governance {
+  if (evidence?.membership === 'nested') return { source: 'nested' };
+  const pim =
+    evidence?.pim.filter(
+      (instance) =>
+        sameId(instance.groupId, group.id) &&
+        sameId(instance.principalId, memberId) &&
+        isCurrentPimMember(instance, evidence.now) &&
+        instance.status ===
+          (evidence.membership === 'eligible' ? 'eligible' : 'active'),
+    ) ?? [];
+  if (evidence?.membership === 'eligible') {
+    if (!pim.length)
+      throw new Error('Eligibility row has no current PIM eligibility.');
+    return { source: 'pim', status: 'eligible', instances: pim };
+  }
   const grants: PackageGrant[] = [];
   for (const pkg of packages) {
     if (!packageContainsGroup(pkg, group.id)) continue;
@@ -74,6 +109,7 @@ export function classifyGovernance(
     }
   }
   if (grants.length) return { source: 'access-package', packages: grants };
+  if (pim.length) return { source: 'pim', status: 'active', instances: pim };
   if (group.groupTypes?.includes('DynamicMembership'))
     return {
       source: 'dynamic',

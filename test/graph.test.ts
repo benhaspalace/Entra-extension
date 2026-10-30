@@ -13,6 +13,30 @@ const json = (body: unknown, status = 200, headers?: HeadersInit) =>
   });
 
 describe('Graph paging and authentication', () => {
+  it.each([
+    '/groups/g/transitiveMembers?$count=true',
+    '/users/u/transitiveMemberOf/microsoft.graph.group?$count=true',
+  ])(
+    'preserves eventual consistency headers on opaque continuations of %s',
+    async (path) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          json({
+            value: [],
+            '@odata.nextLink': 'https://graph.microsoft.com/v1.0/opaque-next',
+          }),
+        )
+        .mockResolvedValueOnce(json({ value: [] }));
+      await createGraphClient(async () => 't', fetcher).list(
+        path,
+        'GroupMember.Read.All',
+      );
+      for (const [, init] of fetcher.mock.calls)
+        expect(init?.headers).toMatchObject({ ConsistencyLevel: 'eventual' });
+    },
+  );
+
   it('follows every continuation, including an empty middle page and opaque query', async () => {
     const next = 'https://graph.microsoft.com/v1.0/groups?$skiptoken=A%2FB%2BC';
     const fetcher = vi

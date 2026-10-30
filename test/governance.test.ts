@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyGovernance,
+  isCurrentPimMember,
   packageContainsGroup,
 } from '../src/shared/governance';
-import type { AccessPackage, Assignment, Group } from '../src/shared/types';
+import type {
+  AccessPackage,
+  Assignment,
+  Group,
+  PimInstance,
+} from '../src/shared/types';
 
 const group: Group = {
   id: 'group',
@@ -29,8 +35,124 @@ const assignment: Assignment = {
     expiration: { type: 'afterDateTime', endDateTime: '2027-01-01T00:00:00Z' },
   },
 };
+const now = Date.parse('2026-10-30T00:00:00Z');
+const pim: PimInstance = {
+  id: 'pim',
+  groupId: 'GROUP',
+  principalId: 'MEMBER',
+  accessId: 'member',
+  status: 'active',
+  assignmentType: 'activated',
+  startDateTime: '2026-10-29T00:00:00Z',
+  endDateTime: '2026-10-31T00:00:00Z',
+};
 
 describe('pure membership governance', () => {
+  it('classifies current PIM member activations and assignments, preserving schedules', () => {
+    const instances = [
+      pim,
+      { ...pim, id: 'assigned', assignmentType: 'assigned', endDateTime: null },
+    ];
+    const before = JSON.stringify(instances);
+    expect(
+      classifyGovernance(group, 'member', [], [], {
+        membership: 'direct',
+        pim: instances,
+        now,
+      }),
+    ).toEqual({ source: 'pim', status: 'active', instances });
+    expect(JSON.stringify(instances)).toBe(before);
+  });
+
+  it.each([
+    { accessId: 'owner' },
+    { accessId: 'unknownFutureValue' },
+    { groupId: 'other' },
+    { principalId: 'other' },
+    { startDateTime: '2026-11-01T00:00:00Z' },
+    { startDateTime: 'invalid' },
+    { endDateTime: '2026-10-30T00:00:00Z' },
+    { endDateTime: 'invalid' },
+    { status: 'eligible' as const },
+  ])(
+    'does not attribute direct membership to unrelated/non-current PIM: %o',
+    (overrides) => {
+      expect(
+        classifyGovernance(group, 'member', [], [], {
+          membership: 'direct',
+          pim: [{ ...pim, ...overrides }],
+          now,
+        }),
+      ).toEqual({ source: 'manual' });
+    },
+  );
+
+  it('keeps eligibility separate from membership, including at the schedule boundaries', () => {
+    const eligible = { ...pim, status: 'eligible' as const };
+    expect(
+      classifyGovernance(group, 'member', [pkg], [assignment], {
+        membership: 'eligible',
+        pim: [eligible, pim],
+        now,
+      }),
+    ).toEqual({ source: 'pim', status: 'eligible', instances: [eligible] });
+    expect(() =>
+      classifyGovernance(group, 'member', [], [], {
+        membership: 'eligible',
+        pim: [pim],
+        now,
+      }),
+    ).toThrow('no current PIM eligibility');
+    expect(isCurrentPimMember(pim, Date.parse(pim.startDateTime))).toBe(true);
+    expect(isCurrentPimMember(pim, Date.parse(pim.endDateTime ?? ''))).toBe(
+      false,
+    );
+  });
+
+  it('labels transitive-only membership nested before attributing parent governance', () => {
+    expect(
+      classifyGovernance(
+        {
+          ...group,
+          groupTypes: ['DynamicMembership'],
+          onPremisesSyncEnabled: true,
+        },
+        'member',
+        [pkg],
+        [assignment],
+        {
+          membership: 'nested',
+          pim: [pim],
+          now,
+        },
+      ),
+    ).toEqual({ source: 'nested' });
+    expect(
+      classifyGovernance(group, 'member', [pkg], [assignment], {
+        membership: 'direct',
+        pim: [pim],
+        now,
+      }).source,
+    ).toBe('access-package');
+    expect(
+      classifyGovernance(
+        {
+          ...group,
+          groupTypes: ['DynamicMembership'],
+          onPremisesSyncEnabled: true,
+        },
+        'member',
+        [],
+        [],
+        {
+          membership: 'direct',
+          pim: [pim],
+          now,
+        },
+      ).source,
+    ).toBe('pim');
+  });
+
   it('requires an AadGroup scope with matching group id', () => {
     expect(packageContainsGroup(pkg, 'group')).toBe(true);
     expect(packageContainsGroup(pkg, 'another')).toBe(false);

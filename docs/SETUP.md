@@ -40,12 +40,14 @@ In the tenant you administer, open **Entra ID > App registrations > New registra
    grants. The extension uses authorization code + S256 PKCE; a public SPA has no secret.
 5. Under **API permissions > Microsoft Graph > Delegated permissions**, add:
 
-| Permission                       | Purpose                                                   |
-| -------------------------------- | --------------------------------------------------------- |
-| `User.Read`                      | Basic signed-in user access                               |
-| `GroupMember.Read.All`           | Read direct memberships and group properties              |
-| `EntitlementManagement.Read.All` | Read packages, resource scopes and assignments            |
-| `AuditLog.Read.All` (optional)   | Find the actor and time for retained membership additions |
+| Permission                                        | Purpose                                                   |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| `User.Read`                                       | Basic signed-in user access                               |
+| `GroupMember.Read.All`                            | Read direct memberships and group properties              |
+| `PrivilegedAssignmentSchedule.Read.AzureADGroup`  | Read active PIM for Groups assignments                    |
+| `PrivilegedEligibilitySchedule.Read.AzureADGroup` | Read PIM for Groups eligibilities                         |
+| `EntitlementManagement.Read.All`                  | Read packages, resource scopes and assignments            |
+| `AuditLog.Read.All` (optional)                    | Find the actor and time for retained membership additions |
 
 An authorized administrator must **grant admin consent** in this tenant. The
 authorization request also includes standard `openid`, `profile`, and
@@ -58,6 +60,12 @@ Administrator** or **Global Reader**. Audit access additionally requires a suppo
 role such as **Reports Reader**, **Security Reader**, or **Global Reader**. Tenant
 licensing and entitlement management availability also apply; consent alone does
 not confer a role.
+
+PIM reads require group membership/ownership or a supported directory-level role:
+**Global Reader** or **Privileged Role Administrator** for role-assignable groups;
+non-role-assignable groups also support roles such as **Groups Administrator** or
+**Identity Governance Administrator**. PIM licensing applies. Existing installs
+must add and admin-consent both PIM scopes, then **sign out and sign in again**.
 
 ## 3. Configure and sign in
 
@@ -84,13 +92,21 @@ detected from the URL only (hash changes, history navigation and one-second
 polling). Membership detection does not inspect the portal DOM; only the user
 profile menu integration below reads the shell DOM.
 
-The panel lists **direct** memberships, with an All / Access package / Manual /
-Dynamic filter. Synced rows appear under All. Each package has its own portal link
+The panel lists **direct and nested** memberships and **PIM eligibility-only**
+rows, with All / Access package / PIM / Nested / Manual / Dynamic filters.
+Synced rows appear under All. Each package has its own portal link
 and assignment expiry information. Duration-based schedules show the ISO 8601
 duration and start date. Member/group links open the corresponding Entra blade.
 
-Delivered access packages take precedence, then dynamic rules, then on-premises
-sync, then manual membership. Historical audit attribution does not change the
+Direct membership wins over nested membership when both exist. For direct
+members, delivered access packages take precedence, then active PIM for Groups,
+then dynamic rules, on-premises sync, and manual membership. PIM includes current
+member assignments and activations, with start/expiry dates; owner assignments
+do not count. Eligibility-only rows explicitly do **not** represent current
+membership. A current member's eligibility is supplementary context, not evidence
+that eligibility granted membership. Nested rows indicate indirect membership,
+not the intermediate group path or a parent's governance as a direct grant.
+Historical audit attribution does not change the
 current classification. Visible manual rows lazily look up retained successful
 `Add member to group` events with at most four concurrent requests; each also has
 a **Look up** / **Retry** button. No result means **unknown**, not evidence that
@@ -148,7 +164,7 @@ can be added there.
   require interaction.
 - **403:** the error names the delegated permission for that operation. Verify
   consent, directory role, tenant licensing and that you chose the intended account.
-  Audit-only failures stay on the affected manual row; package failures stop the
+  Audit-only failures stay on the affected manual row; package, PIM and transitive failures stop the
   main list rather than falsely classifying members as manual.
 - **Redirect or token exchange error:** check the extension ID and exact **SPA**
   redirect URI in this browser/profile. Never work around this by adding a secret.
@@ -170,8 +186,12 @@ can be added there.
   Hidden memberships can require `Member.Read.Hidden`, which isn't requested in
   this phase. User > Groups titles use the user's ID, avoiding an extra
   `User.Read.All` requirement solely for profile display.
-- PIM eligibility, nested/transitive membership explanations, inline portal badges,
-  national clouds and Firefox are not implemented in phase 1.
+- Transitive reads use an eventually consistent index, so recent nested changes
+  may lag. Direct memberships are retained even when absent from that index.
+  Active PIM schedules without a reported membership do not create member rows;
+  only current eligibilities add non-member rows.
+- Intermediate nested-group paths, PIM activation/write operations, inline portal
+  badges, national clouds and Firefox are not implemented.
 
 Settings are stored in `chrome.storage.sync`. Access/refresh tokens and the
 account-scoped package cache stay only in memory-backed `chrome.storage.session`,
@@ -188,6 +208,11 @@ Follow all package/member/group links, switch tabs and blades, try every filter,
 and verify manual attribution and the no-audit-permission case. Sign out and confirm
 the list clears; restart the browser and confirm sign-in is required again.
 Unit tests mock Graph and Chrome; they do not replace this tenant-backed check.
+In both views, also check an active PIM member, an eligible-only principal,
+an owner-only PIM assignment, and a nested member (including one also directly
+added). Confirm PIM dates, separate eligibility wording, direct-over-nested
+precedence, no audit controls for PIM/nested rows, and explicit PIM permission
+errors after removing consent or the required role.
 On a user profile, check that **Access packages** appears once immediately above
 **Custom security attributes**, including after switching sections and portal menu
 rerenders. Open it with mouse, Enter and Space; verify active/expired assignments,

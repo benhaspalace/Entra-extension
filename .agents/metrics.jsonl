@@ -1,2 +1,3 @@
 {"date":"2026-10-29","issue":10,"roles":["implementation agent","review agent","retrospective agent"],"attempts":1,"gateFailures":[],"findings":{"high":0,"medium":0,"low":1,"followUps":2},"lessonsAdded":0,"rulesPromoted":0,"outcome":"pr","durationSec":454}
 {"date":"2026-10-29","issue":17,"roles":["implementation agent","review agent","retrospective agent"],"attempts":2,"gateFailures":[],"findings":{"high":1,"medium":2,"low":0,"followUps":1},"lessonsAdded":1,"rulesPromoted":0,"outcome":"pr","durationSec":408}
+{"date":"2026-10-30","issue":7,"roles":["implementation agent","review agent","retrospective agent"],"attempts":1,"gateFailures":[],"findings":{"high":0,"medium":0,"low":2,"followUps":0},"lessonsAdded":1,"rulesPromoted":0,"outcome":"pr","durationSec":292}

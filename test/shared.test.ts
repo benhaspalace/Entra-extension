@@ -89,6 +89,12 @@ describe('settings and messages', () => {
   it('requests least-privilege delegated scopes and optional audit consent', () => {
     expect(authScopes(settings)).toContain('offline_access');
     expect(authScopes(settings)).toContain(
+      'https://graph.microsoft.com/PrivilegedAssignmentSchedule.Read.AzureADGroup',
+    );
+    expect(authScopes(settings)).toContain(
+      'https://graph.microsoft.com/PrivilegedEligibilitySchedule.Read.AzureADGroup',
+    );
+    expect(authScopes(settings)).toContain(
       'https://graph.microsoft.com/AuditLog.Read.All',
     );
     expect(authScopes({ ...settings, auditEnabled: false })).not.toContain(

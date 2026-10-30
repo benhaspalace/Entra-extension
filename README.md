@@ -1,11 +1,13 @@
 # Entra Admin Helper
 
-A Manifest V3 extension for Microsoft Edge / Chrome that explains **direct group
+A Manifest V3 extension for Microsoft Edge / Chrome that explains **group
 membership** in the Microsoft Entra admin center.
 
 Phase 1 provides a side panel for **Group > Members** and **User > Groups**. It shows
 delivered access packages (including multiple package links and expiry), dynamic
-rules, AD sync, or manual membership with lazy audit-log attribution. Filter rows
+rules, AD sync, active PIM for Groups, nested membership, or manual membership
+with lazy audit-log attribution. PIM eligibilities are shown separately from
+current membership. Filter rows
 by governance source and open the relevant Entra blades from each row.
 
 On any **User profile** blade, an **Access packages** menu item appears directly
@@ -39,4 +41,4 @@ No client secret is needed.
 
 The implementation follows [the design plan](docs/PLAN.md): strict TypeScript,
 esbuild, no UI framework, pure governance classification and Vitest tests.
-Inline badges, PIM and transitive membership explanations remain out of scope.
+Inline badges, intermediate nested-group paths and PIM activation remain out of scope.

@@ -137,7 +137,7 @@ function renderRows(): void {
   const visible = rows.filter(
     (row) => filter.value === 'all' || row.governance.source === filter.value,
   );
-  count.textContent = `${visible.length} of ${rows.length} direct memberships`;
+  count.textContent = `${visible.length} of ${rows.length} memberships / eligibilities`;
   const lookups = new Map<Element, () => void>();
   observer = new IntersectionObserver(
     (entries) => {
@@ -176,6 +176,11 @@ function renderRows(): void {
     const governance = row.governance;
     badge.textContent = {
       'access-package': 'Access package',
+      pim:
+        governance.source === 'pim' && governance.status === 'eligible'
+          ? 'PIM (eligible only)'
+          : 'PIM (active)',
+      nested: 'Nested',
       dynamic: 'Dynamic',
       synced: 'Synced (AD)',
       manual: 'Manual',
@@ -203,12 +208,37 @@ function renderRows(): void {
         }
         item.append(paragraph);
       }
-    } else if (governance.source === 'dynamic')
-      appendText(item, governance.rule);
+    } else if (governance.source === 'pim') {
+      appendText(
+        item,
+        governance.status === 'eligible'
+          ? 'Eligible for activation; eligibility alone does not grant membership.'
+          : 'Active membership managed by PIM for Groups.',
+      );
+      for (const instance of governance.instances) {
+        appendText(
+          item,
+          `${instance.assignmentType === 'activated' ? 'Activated' : governance.status === 'active' ? 'Assigned' : 'Eligible'} from ${new Date(instance.startDateTime).toLocaleString()}${instance.endDateTime ? ` until ${new Date(instance.endDateTime).toLocaleString()}` : ' (no expiration)'}.`,
+        );
+      }
+    } else if (governance.source === 'nested')
+      appendText(
+        item,
+        'Indirect membership through a nested group. The intermediate group path is not resolved.',
+      );
+    else if (governance.source === 'dynamic') appendText(item, governance.rule);
     else if (governance.source === 'manual') {
       const lookup = auditControls(row, item);
       if (auditEnabled) lookups.set(item, lookup);
     }
+    if (
+      row.eligibility.length &&
+      !(governance.source === 'pim' && governance.status === 'eligible')
+    )
+      appendText(
+        item,
+        'Also eligible through PIM for Groups; eligibility is not the cause of the current membership.',
+      );
     rowsElement.append(item);
     if (lookups.has(item)) observer.observe(item);
   }
@@ -247,7 +277,7 @@ async function reload(): Promise<void> {
     const settings = await readSettings();
     if (loadVersion !== version || signal.aborted) return;
     auditEnabled = settings.auditEnabled;
-    setStatus('Loading direct memberships and access package governance...');
+    setStatus('Loading memberships, access packages and PIM governance...');
     const data = await loadMembership(context, graph, auth.sessionId, signal);
     if (loadVersion !== version || signal.aborted) return;
     title.textContent = data.title;
@@ -256,7 +286,7 @@ async function reload(): Promise<void> {
     setStatus(
       rows.length
         ? 'Memberships loaded. Audit lookups run lazily for visible manual rows.'
-        : 'No direct memberships found.',
+        : 'No memberships or PIM eligibilities found.',
     );
   } catch (error) {
     if (loadVersion !== version || signal.aborted) return;

@@ -7,6 +7,154 @@ import { json, mockChrome } from './helpers';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('membership data orchestration', () => {
+  it.each(['group', 'user'] as const)(
+    'loads paged PIM and transitive relationships in the %s view without duplicating direct membership',
+    async (kind) => {
+      const chrome = mockChrome();
+      chrome.session.values.packageCache = {
+        sessionId: 'account',
+        expiresAt: Date.now() + 60_000,
+        packages: [],
+      };
+      const instance = (subject: string, accessId = 'member') => ({
+        id: `schedule-${subject}`,
+        groupId: kind === 'group' ? 'g' : subject,
+        principalId: kind === 'group' ? subject : 'u',
+        accessId,
+        assignmentType: 'activated',
+        startDateTime: '2020-01-01T00:00:00Z',
+        endDateTime: null,
+        principal: { id: subject, displayName: `Principal ${subject}` },
+        group: { id: subject, displayName: `Group ${subject}` },
+      });
+      const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+        const url = new URL(String(input));
+        const path = url.pathname;
+        if (path.endsWith('/groups/g')) return json({ id: 'g' });
+        if (path.endsWith('/users/u')) return json({ id: 'u' });
+        if (
+          path.endsWith('/members') ||
+          path.endsWith('/memberOf/microsoft.graph.group')
+        )
+          return json({ value: [{ id: 'direct', displayName: 'Direct' }] });
+        if (
+          path.endsWith('/transitiveMembers') ||
+          path.includes('/transitiveMemberOf/')
+        ) {
+          expect(init?.headers).toMatchObject({ ConsistencyLevel: 'eventual' });
+          expect(url.searchParams.get('$count')).toBe('true');
+          return json({
+            value: [{ id: 'DIRECT' }],
+            '@odata.nextLink':
+              'https://graph.microsoft.com/v1.0/transitive-next',
+          });
+        }
+        if (path.endsWith('/transitive-next')) {
+          expect(init?.headers).toMatchObject({ ConsistencyLevel: 'eventual' });
+          return json({ value: [{ id: 'nested' }] });
+        }
+        if (path.endsWith('ScheduleInstances')) {
+          expect(url.searchParams.get('$filter')).toBe(
+            kind === 'group' ? "groupId eq 'g'" : "principalId eq 'u'",
+          );
+          expect(url.searchParams.get('$expand')).toBe(
+            kind === 'group' ? 'principal' : 'group',
+          );
+          const eligible = path.endsWith('/eligibilityScheduleInstances');
+          return json({
+            value: [],
+            '@odata.nextLink': `https://graph.microsoft.com/v1.0/${eligible ? 'eligible' : 'active'}-next`,
+          });
+        }
+        if (path.endsWith('/active-next'))
+          return json({
+            value: [
+              instance('direct'),
+              instance('nested'),
+              instance('unconfirmed'),
+            ],
+          });
+        if (path.endsWith('/eligible-next'))
+          return json({
+            value: [
+              instance('eligible'),
+              instance('ELIGIBLE'),
+              instance('direct'),
+              instance('nested'),
+              instance('owner', 'owner'),
+              { ...instance('expired'), endDateTime: '2020-01-02T00:00:00Z' },
+              { ...instance('future'), startDateTime: '2099-01-01T00:00:00Z' },
+            ],
+          });
+        if (path.endsWith('/assignments')) return json({ value: [] });
+        throw new Error(`Unexpected URL: ${url.href}`);
+      });
+      const data = await loadMembership(
+        { kind, id: kind === 'group' ? 'g' : 'u' },
+        createGraphClient(async () => 'token', fetcher),
+        'account',
+        new AbortController().signal,
+      );
+      expect(
+        data.rows.map((row) => [row.membership, row.governance.source]),
+      ).toEqual([
+        ['direct', 'pim'],
+        ['nested', 'nested'],
+        ['eligible', 'pim'],
+      ]);
+      expect(data.rows[0]?.eligibility).toHaveLength(1);
+      expect(data.rows[1]?.eligibility).toHaveLength(1);
+      expect(data.rows[2]?.governance).toMatchObject({
+        source: 'pim',
+        status: 'eligible',
+        instances: [{ id: 'schedule-eligible' }, { id: 'schedule-ELIGIBLE' }],
+      });
+      expect(
+        kind === 'group'
+          ? data.rows[2]?.member.displayName
+          : data.rows[2]?.group.displayName,
+      ).toContain('eligible');
+    },
+  );
+
+  it.each([
+    [
+      'assignmentScheduleInstances',
+      'PrivilegedAssignmentSchedule.Read.AzureADGroup',
+    ],
+    [
+      'eligibilityScheduleInstances',
+      'PrivilegedEligibilitySchedule.Read.AzureADGroup',
+    ],
+    ['transitiveMembers', 'GroupMember.Read.All'],
+  ])(
+    'surfaces %s failures instead of returning incomplete classifications',
+    async (endpoint, scope) => {
+      const chrome = mockChrome();
+      chrome.session.values.packageCache = {
+        sessionId: 'account',
+        expiresAt: Date.now() + 60_000,
+        packages: [],
+      };
+      const fetcher = vi.fn<typeof fetch>(async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith(`/${endpoint}`))
+          return json({ error: { code: 'Forbidden' } }, 403);
+        return url.pathname.endsWith('/groups/g')
+          ? json({ id: 'g' })
+          : json({ value: [] });
+      });
+      await expect(
+        loadMembership(
+          { kind: 'group', id: 'g' },
+          createGraphClient(async () => 't', fetcher),
+          'account',
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(scope);
+    },
+  );
+
   it('paginates packages, role scopes, members and assignments in Group > Members', async () => {
     const chrome = mockChrome();
     chrome.session.values.auth = { sessionId: 'account' };
@@ -15,6 +163,11 @@ describe('membership data orchestration', () => {
       const url = new URL(String(input));
       fetched.push(url.href);
       const path = url.pathname;
+      if (
+        path.endsWith('/transitiveMembers') ||
+        path.endsWith('ScheduleInstances')
+      )
+        return json({ value: [] });
       if (path.endsWith('/accessPackages')) {
         return json({
           value: [
@@ -143,6 +296,11 @@ describe('membership data orchestration', () => {
     };
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
+      if (
+        url.pathname.includes('/transitiveMemberOf/') ||
+        url.pathname.endsWith('ScheduleInstances')
+      )
+        return json({ value: [] });
       if (url.pathname.endsWith('/users/user')) {
         expect(url.searchParams.get('$select')).toBe(
           'displayName,userPrincipalName',
@@ -234,6 +392,11 @@ describe('membership data orchestration', () => {
     };
     const fetcher = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
+      if (
+        url.pathname.includes('/transitiveMemberOf/') ||
+        url.pathname.endsWith('ScheduleInstances')
+      )
+        return json({ value: [] });
       if (url.pathname.endsWith('/users/user'))
         return json({ error: { code: 'Authorization_RequestDenied' } }, 403);
       if (url.pathname.endsWith('/memberOf/microsoft.graph.group'))
