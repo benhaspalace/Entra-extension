@@ -170,6 +170,134 @@ function expectPolicyStop() {
 }
 
 describe('issue harness publishing policy', () => {
+  it('blocks unrelated harness edits before configured commands or review', async () => {
+    const implementation = git.getMockImplementation();
+    git.mockImplementation((args) =>
+      args[0] === 'diff' && args.includes('--name-only')
+        ? ok('scripts/harness/run.mjs\0')
+        : implementation(args),
+    );
+    await execute();
+    expect(process.exitCode).toBe(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(runAgent.mock.calls.map(([{ task }]) => task)).toEqual([
+      'implement',
+    ]);
+    expect(git.mock.calls.some(([args]) => args[0] === 'commit')).toBe(false);
+    expect(appendFileSync.mock.calls[0][1]).toContain('out-of-scope edit');
+  });
+
+  it('retries guard failures with feedback and rechecks against the pinned base', async () => {
+    loadConfig.mockReturnValue({ ...loadConfig(), maxAttempts: 2 });
+    const implementation = git.getMockImplementation();
+    let checks = 0;
+    git.mockImplementation((args) =>
+      args[0] === 'diff' && args.includes('--name-only')
+        ? ok(++checks === 1 ? 'scripts/harness/run.mjs\0' : '')
+        : args[0] === 'rev-parse' && args.length === 2
+          ? ok('pinned-base')
+          : implementation(args),
+    );
+    await execute();
+    expect(process.exitCode).toBe(0);
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'implement-2',
+        prompt: expect.stringContaining('out-of-scope edit'),
+      }),
+    );
+    expect(checks).toBe(2);
+    expect(
+      git.mock.calls
+        .filter(([args]) => args.includes('--name-only'))
+        .every(([args]) => args.includes('pinned-base')),
+    ).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])(
+    'retries invalid test syntax instead of stopping as needs-human (new file: %s)',
+    async (newFile) => {
+      loadConfig.mockReturnValue({ ...loadConfig(), maxAttempts: 2 });
+      const path = 'example.test.mjs';
+      const valid = `it('existing', () => {});`;
+      files.set(path, `it('existing', () => {`);
+      const implementation = git.getMockImplementation();
+      git.mockImplementation((args) =>
+        args[0] === 'ls-tree'
+          ? ok(newFile ? '' : `${path}\0`)
+          : args[0] === 'diff' && args.includes('--name-only')
+            ? ok(`${path}\0`)
+            : args[0] === 'show'
+              ? ok(valid)
+              : implementation(args),
+      );
+      const implementationAgent = runAgent.getMockImplementation();
+      runAgent.mockImplementation((options) => {
+        if (options.role === 'implement-2') files.set(path, valid);
+        return implementationAgent(options);
+      });
+
+      await execute();
+
+      expect(process.exitCode).toBe(0);
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: 'implement-2',
+          prompt: expect.stringContaining(
+            `${path}: cannot inspect test declarations: invalid syntax.`,
+          ),
+        }),
+      );
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(runAgent.mock.calls.map(([{ task }]) => task)).toEqual([
+        'implement',
+        'implement',
+        'review',
+        'retro',
+      ]);
+      expect(
+        gh.mock.calls.some(
+          ([args]) =>
+            args.includes('--add-label') && args.includes('agent:needs-human'),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it('checks the guard again after independent review fixes', async () => {
+    review.findings = [{ severity: 'high', summary: 'Fix paging' }];
+    const implementation = git.getMockImplementation();
+    let checks = 0;
+    git.mockImplementation((args) =>
+      args[0] === 'diff' && args.includes('--name-only')
+        ? ok(++checks === 2 ? 'docs/HARNESS.md\0' : '')
+        : implementation(args),
+    );
+    await execute();
+    expect(process.exitCode).toBe(1);
+    expect(checks).toBe(2);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(runAgent.mock.calls.some(([{ task }]) => task === 'retro')).toBe(
+      false,
+    );
+    expect(git.mock.calls.some(([args]) => args[0] === 'commit')).toBe(false);
+  });
+
+  it('allows harness edits named in the frozen approved issue', async () => {
+    issue.body = 'Update scripts/harness/ and docs/HARNESS.md';
+    comments[0].body = `agent:approve sha256:${createIssueSnapshot(issue, []).digest}`;
+    const implementation = git.getMockImplementation();
+    git.mockImplementation((args) =>
+      args[0] === 'diff' && args.includes('--name-only')
+        ? ok('scripts/harness/run.mjs\0docs/HARNESS.md\0')
+        : implementation(args),
+    );
+    await execute();
+    expect(process.exitCode).toBe(0);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves the successful commit/PR workflow for clean text', async () => {
     await execute();
     expect(process.exitCode).toBe(0);

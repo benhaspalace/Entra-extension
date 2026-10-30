@@ -45,6 +45,28 @@ in whenever it moves, to keep them free of conflicts.
 
 ## Usage
 
+### Change guard
+
+Every issue-run gate checks the complete working-tree diff against the base commit
+captured before implementation, before running the configured gate commands. This
+includes staged, unstaged, and non-ignored new files, and runs again after review fixes.
+Deleting an existing `*.test.*` / `*.spec.*` source file (or source file in `__tests__`)
+or removing an `it`/`test` declaration fails the gate, even if other tests are added.
+Literal titles are compared per file with duplicate counts; modifiers, parameterized
+declarations, and named import aliases are supported. Formatting and reordering cases
+within a file are allowed. Renaming a file or case is conservatively treated as removal;
+restore it rather than bypassing the guard. This check does not prove that assertions
+or parameterized datasets were preserved; independent review is still required.
+Invalid syntax in a modified or new test file also fails the gate with diagnostic
+feedback through the normal retry loop.
+
+Changes under `scripts/harness/` require that exact directory reference in the approved
+issue title or body. Changes to `docs/HARNESS.md` require that exact file reference.
+Backslash path separators are also accepted. Comments, the issue number alone, agent
+output, and branch names cannot authorize those edits. There is no deletion override.
+Failures are fed back through the normal gate-retry loop and prevent review/publication
+until corrected. Dry-run previews do not inspect changes or execute gate commands.
+
 One-time setup: copy `.agents/harness.local.example.json` to
 `.agents/harness.local.json` and replace every placeholder with your local agent CLI
 binary name, task model IDs, and automated reviewer's login. The local file is
