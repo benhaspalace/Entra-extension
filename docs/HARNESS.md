@@ -132,7 +132,7 @@ containers. `PR_GATE_IMAGE` overrides `prGateImage` in the ignored local configu
 Set either to a trusted local image ID (`sha256:<64 hex digits>`)
 or repository digest (`name@sha256:<64 hex digits>`). Tags are rejected and images
 are never pulled by the workflow. The image must be secretless, provide `/bin/sh`,
-`cp`, `ln`, Node >=22.12, and the project's preinstalled Linux dependencies at
+`cp`, `mkdir`, `ln`, Node >=22.12, and the project's preinstalled Linux dependencies at
 `/opt/node_modules`, readable by UID/GID 65534. Provision it from a reviewed, trusted
 revision of these scripts and Dockerfile, never from an unreviewed PR checkout:
 
@@ -161,6 +161,13 @@ agent artifacts, `.env` files, and dependencies. Keep secrets out of source file
 Symlinks and non-regular input files are rejected. The container runs unprivileged,
 with dropped capabilities, no-new-privileges, a read-only root, resource limits, and
 temporary writable workspace storage; its source snapshot is removed afterward.
+The workspace has a real, writable `node_modules` directory on tmpfs with links to
+each top-level package or scope in the read-only `/opt/node_modules`. This keeps
+Vitest/Vite caches (including `node_modules/.vitest-cache` and `node_modules/.vite`)
+writable without copying dependencies or making image packages writable. Node
+resolves linked tools and their imports from `/opt`; workspace build and test
+imports, ESLint configuration imports, and TypeScript's module and implicit
+`@types` lookup still find dependencies through `/workspace/node_modules`.
 The trusted gate directly runs build, tests, lint, and typecheck, rather than a PR's
 mutable `package.json` verification command. The orchestrator runs the local text
 policy using trusted code on the host. Missing images, Docker, or prerequisites

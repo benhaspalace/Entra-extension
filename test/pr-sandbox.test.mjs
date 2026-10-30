@@ -151,6 +151,28 @@ describe('isolated PR quality gate', () => {
     expect(existsSync(snapshot)).toBe(false);
   });
 
+  it('creates a writable dependency root with image package links before every gate step', () => {
+    verifyInSandbox();
+    const args = run.mock.calls[0][1];
+    expect(args.at(-1)).toBe(
+      [
+        'cp -R /input/. /workspace/',
+        'cd /workspace',
+        'mkdir node_modules',
+        'for dependency in /opt/node_modules/*; do ln -s "$dependency" node_modules/ || exit; done',
+        'node scripts/build.mjs',
+        'node node_modules/vitest/vitest.mjs run',
+        'node node_modules/eslint/bin/eslint.js .',
+        'node node_modules/typescript/bin/tsc --noEmit',
+      ].join(' && '),
+    );
+    expect(args).toContain(
+      '--tmpfs=/workspace:rw,nosuid,nodev,size=1g,mode=1777',
+    );
+    expect(args).toContain('--read-only');
+    expect(args.at(-1)).not.toContain('ln -s /opt/node_modules node_modules');
+  });
+
   it('never copies ignored credentials, Git metadata, dependencies or agent artifacts, even if explicitly listed', () => {
     for (const path of [
       join('.git', 'config'),

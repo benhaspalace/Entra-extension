@@ -15,7 +15,9 @@ import { loadLocalConfig } from '../harness/config.mjs';
 const GATE = [
   'cp -R /input/. /workspace/',
   'cd /workspace',
-  'ln -s /opt/node_modules node_modules',
+  // Keep the dependency root writable for tool caches, not the image packages.
+  'mkdir node_modules',
+  'for dependency in /opt/node_modules/*; do ln -s "$dependency" node_modules/ || exit; done',
   'node scripts/build.mjs',
   'node node_modules/vitest/vitest.mjs run',
   'node node_modules/eslint/bin/eslint.js .',
