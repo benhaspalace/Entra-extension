@@ -1,7 +1,10 @@
 import type { GraphClient } from '../shared/graph';
+import { pendingRequestsForUser } from '../shared/accessPackages';
+import { errorMessage } from '../shared/messages';
 import { ENTITLEMENTS, PACKAGE_SCOPE, loadPackages } from '../shared/packages';
 import type {
   Assignment,
+  AssignmentRequest,
   PackageResource,
   UserAccessPackages,
 } from '../shared/types';
@@ -12,20 +15,38 @@ export async function loadUserAccessPackages(
   sessionId: string,
   signal: AbortSignal,
 ): Promise<UserAccessPackages> {
-  const [packages, assignments] = await Promise.all([
+  const [packages, assignments, requestData] = await Promise.all([
     loadPackages(graph, sessionId, signal),
     graph.list<Assignment>(
       `${ENTITLEMENTS}/assignments?$filter=${encodeURIComponent(`target/objectId eq '${userId}'`)}&$expand=accessPackage($expand=catalog),assignmentPolicy,target`,
       PACKAGE_SCOPE,
       signal,
     ),
+    graph
+      .list<AssignmentRequest>(
+        `${ENTITLEMENTS}/assignmentRequests?$filter=${encodeURIComponent("state eq 'pendingApproval'")}&$expand=accessPackage,assignment($expand=target),requestor`,
+        PACKAGE_SCOPE,
+        signal,
+      )
+      .then((requests) => ({
+        pendingRequests: pendingRequestsForUser(requests, userId),
+      }))
+      .catch((error: unknown) => ({
+        pendingRequests: [],
+        pendingRequestsError: errorMessage(error),
+      })),
   ]);
+  const { pendingRequests } = requestData;
   const byId = new Map(packages.map((pkg) => [pkg.id.toLowerCase(), pkg]));
   return {
     userId,
     displayName:
       assignments.find((assignment) => assignment.target?.displayName)?.target
-        ?.displayName ?? userId,
+        ?.displayName ??
+      pendingRequests.find((request) => request.assignment?.target?.displayName)
+        ?.assignment?.target?.displayName ??
+      userId,
+    ...requestData,
     assignments: assignments.map((assignment) => {
       const pkg = byId.get(assignment.accessPackage?.id.toLowerCase() ?? '');
       const resources = new Map<string, PackageResource>();

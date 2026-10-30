@@ -62,3 +62,6 @@ Follow `AGENTS.md` and `docs/PLAN.md`.
 ## Learned rules
 
 Promoted from `.agents/LESSONS.md` after recurring in runs. Keep each rule short and checkable.
+
+- Make non-essential Graph lookups optional (separate from the primary load, e.g. `Promise.allSettled`) so one 403/400 cannot fail a whole view.
+- Use only `$expand`/endpoints documented for Graph v1.0 on Microsoft Learn; never describe an expansion as documented without checking.

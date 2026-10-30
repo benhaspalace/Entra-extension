@@ -66,7 +66,20 @@ Drawer contents for the user:
   **Expired / failed**. Per row: access package name (hyperlink), catalog, policy name,
   state, start date, expiry date (or "No expiration"), and the resources the package grants
   (groups as hyperlinks, from the cached package → resource map of feature 1).
-- Pending requests (`assignmentRequests`) are backlog; phase 1 shows assignments only.
+- **Pending requests**: package hyperlink, requested date (`createdDateTime`, UTC),
+  and requestor (display name, falling back to principal name, email or object ID).
+  Load `GET /identityGovernance/entitlementManagement/assignmentRequests?$filter=state eq 'pendingApproval'&$expand=accessPackage,assignment($expand=target),requestor`
+  using the existing paged Graph client and `EntitlementManagement.Read.All`.
+  The [v1.0 request resource](https://learn.microsoft.com/en-us/graph/api/resources/accesspackageassignmentrequest?view=graph-rest-1.0)
+  documents the `state` filter as **eq-only**; the
+  [list API](https://learn.microsoft.com/en-us/graph/api/entitlementmanagement-list-assignmentrequests?view=graph-rest-1.0)
+  documents these expansions. Match `assignment.target.objectId` to the drawer user
+  client-side, not `requestor.objectId` (requests can be made on behalf of others).
+  Do not assume an undocumented user-target filter on requests. Show "No pending
+  requests" only after a successful empty query. Pending-request queries are optional:
+  if any page fails, preserve the assignment sections and show the error in
+  **Pending requests**, with guidance to use **Refresh** to retry. Do not present
+  incomplete request results or a failed lookup as "No pending requests".
 - Empty state: "No access package assignments". Error states as in the side panel.
 
 ## UI decision: side panel first, inline badges second

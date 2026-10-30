@@ -52,10 +52,28 @@ export interface UserPackageAssignment extends Assignment {
   resources: PackageResource[];
 }
 
+export interface AssignmentRequest {
+  id: string;
+  state: string;
+  createdDateTime?: string | null;
+  accessPackage?: Assignment['accessPackage'] | null;
+  assignment?: {
+    target?: { objectId?: string | null; displayName?: string | null } | null;
+  } | null;
+  requestor?: {
+    displayName?: string | null;
+    principalName?: string | null;
+    email?: string | null;
+    objectId?: string | null;
+  } | null;
+}
+
 export interface UserAccessPackages {
   userId: string;
   displayName: string;
   assignments: UserPackageAssignment[];
+  pendingRequests: AssignmentRequest[];
+  pendingRequestsError?: string;
 }
 
 export interface DirectoryAudit {

@@ -40,6 +40,7 @@ function data(): UserAccessPackages {
   return {
     userId: ID,
     displayName: '<img src=x onerror=alert(1)> User',
+    pendingRequests: [],
     assignments: [
       {
         id: 'a',
@@ -91,7 +92,8 @@ describe('closed-shadow access package drawer', () => {
     );
     expect(
       [...shadow.querySelectorAll('h2')].map((h) => h.textContent),
-    ).toEqual(['Active', 'Expired / failed']);
+    ).toEqual(['Active', 'Expired / failed', 'Pending requests']);
+    expect(shadow.textContent).toContain('No pending requests');
     expect(shadow.querySelectorAll('article')).toHaveLength(2);
     expect(shadow.textContent).toContain('Catalog: Catalog');
     expect(shadow.textContent).toContain('Policy: Policy');
@@ -138,11 +140,101 @@ describe('closed-shadow access package drawer', () => {
       expect(shadow.textContent).toContain('No access package assignments'),
     );
     expect(shadow.querySelector('article')).toBeNull();
+    expect(shadow.textContent).toContain('No pending requests');
     button('Close').dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
     );
     expect(host.isConnected).toBe(false);
     expect(document.activeElement).toBe(returnFocus);
+  });
+
+  it('shows pending-only requests with safe package links, UTC dates and requestors', async () => {
+    const value: UserAccessPackages = {
+      ...data(),
+      assignments: [],
+      pendingRequests: [
+        {
+          id: 'pending',
+          state: 'pendingApproval',
+          accessPackage: {
+            id: 'pending-package',
+            displayName: '<img src=x> Pending package',
+          },
+          createdDateTime: '2026-10-29T18:00:00+02:00',
+          requestor: { displayName: '<script>Admin</script>' },
+        },
+        {
+          id: 'missing',
+          state: 'pendingApproval',
+          accessPackage: null,
+          createdDateTime: null,
+          requestor: null,
+        },
+      ],
+    };
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value })
+      .mockResolvedValue({ ok: true, value: data() });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    openDrawer(ID, returnFocus);
+    await vi.waitFor(() =>
+      expect(shadow.querySelectorAll('article')).toHaveLength(2),
+    );
+    expect(shadow.textContent).toContain(
+      '0 assignments. 2 pending requests. Dates are UTC.',
+    );
+    expect(shadow.textContent).toContain('Requested: 2026-10-29T16:00:00.000Z');
+    expect(shadow.textContent).toContain('Requestor: <script>Admin</script>');
+    expect(shadow.textContent).toContain('Access package not provided');
+    expect(shadow.textContent).toContain('Requested: Not provided');
+    expect(shadow.textContent).toContain('Requestor: Not provided');
+    expect(shadow.querySelector('script, img')).toBeNull();
+    const anchor = shadow.querySelector('a');
+    expect(anchor?.href).toBe(packageLink('pending-package'));
+    expect(anchor?.textContent).toBe('<img src=x> Pending package');
+    expect(anchor?.rel).toBe('noopener noreferrer');
+    expect(anchor?.target).toBe('_blank');
+    button('Refresh').click();
+    await vi.waitFor(() =>
+      expect(shadow.textContent).toContain('No pending requests'),
+    );
+    expect(shadow.textContent).not.toContain('Pending package');
+  });
+
+  it('keeps assignment sections when pending requests fail and clears the error after retry', async () => {
+    const error =
+      'Missing permission or directory role: EntitlementManagement.Read.All.';
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { ...data(), pendingRequestsError: error },
+      })
+      .mockResolvedValue({ ok: true, value: data() });
+    vi.stubGlobal('chrome', { runtime: { sendMessage } });
+    openDrawer(ID, returnFocus);
+    await vi.waitFor(() =>
+      expect(shadow.querySelector('[role="alert"]')?.textContent).toBe(
+        `Could not load pending requests: ${error} Use Refresh to retry.`,
+      ),
+    );
+    expect(shadow.querySelectorAll('article')).toHaveLength(2);
+    expect(
+      [...shadow.querySelectorAll('h2')].map((h) => h.textContent),
+    ).toEqual(['Active', 'Expired / failed', 'Pending requests']);
+    expect(
+      shadow.querySelector('[role="alert"]')?.previousElementSibling
+        ?.textContent,
+    ).toBe('Pending requests');
+    expect(shadow.textContent).not.toContain('No pending requests');
+    expect(button('Refresh').disabled).toBe(false);
+    button('Refresh').click();
+    await vi.waitFor(() =>
+      expect(shadow.textContent).toContain('No pending requests'),
+    );
+    expect(shadow.querySelector('[role="alert"]')).toBeNull();
+    expect(shadow.querySelectorAll('article')).toHaveLength(2);
   });
 
   it.each([

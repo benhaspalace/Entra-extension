@@ -1,4 +1,4 @@
-import type { Assignment } from './types';
+import type { Assignment, AssignmentRequest } from './types';
 import { isActiveAssignment } from './governance';
 
 export function groupAssignments<T extends Assignment>(
@@ -10,6 +10,30 @@ export function groupAssignments<T extends Assignment>(
     (isActiveAssignment(assignment.state) ? active : inactive).push(assignment);
   }
   return { active, inactive };
+}
+
+export function pendingRequestsForUser(
+  requests: readonly AssignmentRequest[],
+  userId: string,
+): AssignmentRequest[] {
+  return requests.filter(
+    (request) =>
+      request.state === 'pendingApproval' &&
+      request.assignment?.target?.objectId?.toLowerCase() ===
+        userId.toLowerCase(),
+  );
+}
+
+export function formatRequestor(
+  requestor: AssignmentRequest['requestor'],
+): string {
+  return (
+    requestor?.displayName ||
+    requestor?.principalName ||
+    requestor?.email ||
+    requestor?.objectId ||
+    'Not provided'
+  );
 }
 
 export function formatDate(value: string | null | undefined): string {
