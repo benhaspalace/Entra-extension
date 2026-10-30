@@ -62,6 +62,7 @@ function shapeComment(comment) {
     path: comment.path,
     line: comment.line ?? null,
     body: comment.body,
+    ...(comment.createdAt ? { createdAt: comment.createdAt } : {}),
   };
 }
 
@@ -99,7 +100,7 @@ export function isAddressResult(value, expectedIds) {
       !Number.isSafeInteger(comment.commentId) ||
       comment.commentId <= 0 ||
       ids.has(comment.commentId) ||
-      !['fixed', 'declined'].includes(comment.action) ||
+      !['fixed', 'declined', 'partial'].includes(comment.action) ||
       typeof comment.reply !== 'string' ||
       !comment.reply.trim() ||
       /[\r\n]/.test(comment.reply)
@@ -120,6 +121,12 @@ export function parseAddressResult(text, expectedIds) {
     return null;
   const value = extractJson(finalBlock[0]);
   return isAddressResult(value, expectedIds) ? value : null;
+}
+
+export function addressReply(comment, sha) {
+  if (comment.action === 'declined') return `Declined: ${comment.reply}`;
+  const prefix = comment.action === 'partial' ? 'Partly fixed' : 'Fixed';
+  return `${prefix} in ${sha.slice(0, 7)}: ${comment.reply}`;
 }
 
 export function parsePrArgs(argv, allowDryRun = false) {

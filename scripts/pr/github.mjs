@@ -8,7 +8,7 @@ const THREADS = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String) {
     pullRequest(number:$pr) {
       reviewThreads(first:100,after:$cursor) {
         nodes { id isResolved comments(first:100) {
-          nodes { fullDatabaseId author { login __typename } path line body }
+          nodes { fullDatabaseId author { login __typename } path line body createdAt }
           pageInfo { hasNextPage endCursor }
         } }
         pageInfo { hasNextPage endCursor }
@@ -20,7 +20,7 @@ const THREADS = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String) {
 const COMMENTS = `query($id:ID!,$cursor:String) {
   node(id:$id) { ... on PullRequestReviewThread {
     comments(first:100,after:$cursor) {
-      nodes { fullDatabaseId author { login __typename } path line body }
+      nodes { fullDatabaseId author { login __typename } path line body createdAt }
       pageInfo { hasNextPage endCursor }
     }
   } }

@@ -9,5 +9,7 @@
     "addressComments": "<address-comments-model-id>",
     "triage": "<triage-model-id>"
   },
-  "reviewBotLogin": "<review-bot-login>"
+  "reviewBotLogin": "<review-bot-login>",
+  "reviewTriggers": ["<code-review-trigger>", "<security-review-trigger>"],
+  "reviewStateMarker": "<review-state-marker>"
 }

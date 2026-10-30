@@ -58,6 +58,16 @@ Follow `AGENTS.md` and `docs/PLAN.md`.
 - Reply manually: `npm run pr:reply -- <pr> <commentId> "<message>"` (`--no-resolve` to leave open).
 - Sync stacked PRs and resolve conflicts: `npm run pr:sync -- <branch> <base>`.
 - Quality gate: `npm run verify`.
+- CI parity: `npm run ci` (manifest/version gate, verify, actionlint when installed).
+- Request both reviews: `npm run pr:request-review -- <pr>`.
+- Merge readiness: `npm run pr:review-check -- <pr>`.
+
+## Trust-surface changes
+
+PRs touching `.github/**`, `AGENTS.md`, `.agents/**`, `scripts/**`, `package.json`,
+`package-lock.json`, or `manifest.json` require a clean current-head security review
+and are **owner-merge only**. Never auto-merge them. Branch rules and repository
+settings must enforce the CI and `review-readiness` status checks; see `docs/HARNESS.md`.
 
 ## Learned rules
 

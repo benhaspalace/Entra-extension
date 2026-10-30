@@ -32,6 +32,12 @@ npm run lint
 npm run typecheck
 ```
 
+`npm run ci` runs the full verification gate plus manifest/version checks and
+actionlint when installed (required in CI). `npm run package` packages a previously
+built `dist` into `release/extension-<version>.zip` with `SHA256SUMS`.
+See [CI, release, and automated review setup](docs/HARNESS.md#ci-and-releases)
+for the protected tag-release flow and owner configuration.
+
 Load `dist` as an unpacked extension, register a single-tenant Entra SPA, and enter
 its tenant/client IDs in Options. **[Setup instructions](docs/SETUP.md)** cover
 the redirect URI, delegated permissions, admin consent, directory roles and limits.
