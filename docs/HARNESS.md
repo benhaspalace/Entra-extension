@@ -329,6 +329,10 @@ Declines are listed in the run summary for the owner.
 An all-declined run without changes replies without an empty commit or push.
 Reporting `fixed` or `partial` without any changes is an error.
 Failures leave local changes for inspection but do not publish replies before the push.
+After publication, a review-request failure does not prevent thread replies, and a
+reply or resolution failure does not prevent attempts on remaining threads. All such
+failures are reported together after every selected thread has been attempted;
+inspect posted replies before retrying.
 Dry-run reads GitHub and saves an ignored prompt/reply preview, but does not check out,
 edit code, invoke models, run the gate, commit, push, or reply.
 

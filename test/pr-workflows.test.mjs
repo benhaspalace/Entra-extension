@@ -298,6 +298,82 @@ describe('address review workflow', () => {
     expect(hasPush()).toBe(true);
   });
 
+  it.each(['PR head polling timed out', 'review-request POST rejected'])(
+    'still replies and resolves fixed threads when review requests fail: %s',
+    (message) => {
+      requestReview.mockImplementation(() => {
+        throw new Error(message);
+      });
+      expect(() => address(9)).toThrow(message);
+      expect(hasPush()).toBe(true);
+      expect(replyToThread).toHaveBeenCalledTimes(2);
+      expect(replyToThread.mock.calls[0]).toEqual([
+        9,
+        expect.any(Object),
+        threads[0],
+        'Fixed in publish: Fixed the bug.',
+        true,
+      ]);
+      expect(replyToThread.mock.calls[1]).toEqual([
+        9,
+        expect.any(Object),
+        threads[1],
+        'Declined: The guard already handles this.',
+        false,
+      ]);
+    },
+  );
+
+  it('attempts later threads after an earlier reply or resolution fails', () => {
+    replyToThread.mockImplementationOnce(() => {
+      throw new Error('reply or resolution rejected');
+    });
+    expect(() => address(9)).toThrow(
+      /Thread #123.*reply or resolution rejected/,
+    );
+    expect(replyToThread).toHaveBeenCalledTimes(2);
+    expect(replyToThread.mock.calls[1][2]).toBe(threads[1]);
+  });
+
+  it('reports all review-request and thread failures after attempting every thread', () => {
+    const reviewError = new Error('review request rejected');
+    const threadErrors = [
+      new Error('reply rejected'),
+      new Error('resolution rejected'),
+    ];
+    requestReview.mockImplementation(() => {
+      throw reviewError;
+    });
+    for (const error of threadErrors)
+      replyToThread.mockImplementationOnce(() => {
+        throw error;
+      });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      let failure;
+      try {
+        address(9);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(failure.errors.map((error) => error.cause)).toEqual([
+        reviewError,
+        ...threadErrors,
+      ]);
+      expect(failure.message).toMatch(/published-sha.*review request rejected/);
+      expect(failure.message).toMatch(
+        /#123.*reply rejected.*#125.*resolution rejected/,
+      );
+      expect(replyToThread).toHaveBeenCalledTimes(2);
+      expect(log).not.toHaveBeenCalledWith(
+        expect.stringContaining('Addressed 2 review threads'),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('leaves declined-only threads open without creating an empty commit', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     changed = false;
