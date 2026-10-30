@@ -137,9 +137,13 @@ The menu is cloned from a shell resource-menu item, without its navigation,
 selection state or listeners. It is reinserted after portal rerenders and removed
 when leaving the user profile; changing users also closes the drawer. The drawer
 is isolated in a closed Shadow DOM. If the anchor label cannot be found, nothing
-is injected and the existing side panel remains usable. Currently the label list
-in `src/content/menuLabels.ts` supports English; additional localized anchor labels
-can be added there.
+is injected and the existing side panel remains usable. The anchor label list in
+`src/content/menuLabels.ts` supports English, German, French, Spanish, Italian,
+Dutch, Brazilian Portuguese, and Japanese. The injected menu text and accessible
+label use the browser's `navigator.language` (including regional variants), with
+English fallback for unsupported languages. The portal language can differ from
+the browser language; anchor detection recognizes all supported portal labels.
+The drawer and side panel remain in English.
 
 ## Troubleshooting and limits
 
@@ -157,8 +161,9 @@ can be added there.
   on any matching user profile section. Encoded and double-encoded hash routes
   are supported.
 - **Access packages item missing:** use the user profile blade on
-  `entra.microsoft.com` and check for the English **Custom security attributes**
-  anchor in the shell menu. A localized or changed portal menu is skipped safely.
+  `entra.microsoft.com` and check for **Custom security attributes** (or its
+  supported localized label) in the shell menu. An unsupported or changed portal
+  menu is skipped safely.
   Reload the portal after reloading the extension.
 - **Unknown audit attribution:** typical P1/P2 audit retention is 30 days (tenant
   policy/licensing may differ). Removed/re-added memberships and service actions

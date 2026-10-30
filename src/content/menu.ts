@@ -39,6 +39,7 @@ export function findAnchorItem(
 }
 
 export function cloneMenuItem(anchor: HTMLElement): HTMLElement {
+  const localizedLabel = accessPackagesLabel(navigator.language);
   const clone = anchor.cloneNode(true) as HTMLElement;
   clone
     .querySelectorAll(
@@ -72,7 +73,7 @@ export function cloneMenuItem(anchor: HTMLElement): HTMLElement {
     -1,
   )?.parentElement;
   const wrapper = label ?? clone;
-  wrapper.textContent = accessPackagesLabel;
+  wrapper.textContent = localizedLabel;
   const icons = [
     ...clone.querySelectorAll('svg, [class*="icon"], [class*="Icon"]'),
   ].filter((node) => node !== wrapper && !node.contains(wrapper));
@@ -101,6 +102,6 @@ export function cloneMenuItem(anchor: HTMLElement): HTMLElement {
   clone.dataset.entraHelper = 'access-packages';
   clone.setAttribute('role', anchor.getAttribute('role') ?? 'menuitem');
   clone.setAttribute('tabindex', '0');
-  clone.setAttribute('aria-label', accessPackagesLabel);
+  clone.setAttribute('aria-label', localizedLabel);
   return clone;
 }
