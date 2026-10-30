@@ -15,7 +15,8 @@ const change = (before, after, path = 'test/example.test.ts') => ({
   before,
   after,
 });
-const cases = (text) => testCases('example.test.ts', text);
+const declarations = (text) => testCases('example.test.ts', text);
+const cases = (text) => declarations(text).map(({ title }) => title);
 let directory;
 
 afterEach(() => {
@@ -77,9 +78,292 @@ describe('test declaration inspection', () => {
   it('fails explicitly when test syntax cannot be inspected', () => {
     expect(() => cases(`it('broken', () => {`)).toThrow(/invalid syntax/);
   });
+
+  it('records modifier chains, conditions and inherited suite modifiers', () => {
+    expect(
+      declarations(`
+        import { describe as group, it as check } from 'vitest';
+        group.skip.each([1])('outer', () => {
+          describe.runIf(enabled)('inner', () => {
+            check.concurrent.only.skipIf(disabled)('case', () => {});
+          });
+        });
+      `),
+    ).toEqual([
+      {
+        title: 'case',
+        modifiers: [
+          { name: 'skip' },
+          { name: 'each' },
+          { name: 'runIf', condition: 'enabled' },
+          { name: 'concurrent' },
+          { name: 'only' },
+          { name: 'skipIf', condition: 'disabled' },
+        ],
+      },
+    ]);
+  });
+
+  it('records literal, conditional and inherited options without leaking to siblings', () => {
+    expect(
+      declarations(`
+        describe('suite', { skip: true, only: false }, () => {
+          it('nested', { 'todo': pending }, () => {});
+        });
+        test('sibling', { skip, ['only']: focused }, () => {});
+      `),
+    ).toEqual([
+      {
+        title: 'nested',
+        modifiers: [{ name: 'skip' }, { name: 'todo', condition: 'pending' }],
+      },
+      {
+        title: 'sibling',
+        modifiers: [
+          { name: 'skip', condition: 'skip' },
+          { name: 'only', condition: 'focused' },
+        ],
+      },
+    ]);
+  });
 });
 
 describe('change policy', () => {
+  it.each(
+    ['vitest', 'node:test'].flatMap((module) =>
+      ['skip', 'todo', 'only'].flatMap((modifier) =>
+        ['true', 'condition'].flatMap((value) =>
+          ['it', 'test', 'describe', 'suite'].map((declaration) => ({
+            module,
+            modifier,
+            value,
+            declaration,
+          })),
+        ),
+      ),
+    ),
+  )(
+    'rejects $module $declaration options { $modifier: $value }',
+    ({ module, modifier, value, declaration }) => {
+      const imports = `import { it, test, describe, suite } from '${module}';`;
+      const options = `{ ${modifier}: ${value} }`;
+      const after = ['describe', 'suite'].includes(declaration)
+        ? `${declaration}('group', ${options}, () => { it('existing', () => {}); });`
+        : `${declaration}('existing', ${options}, () => {});`;
+      expect(
+        changeViolations(
+          [
+            change(
+              `${imports} it('existing', () => {});`,
+              `${imports} ${after}`,
+            ),
+          ],
+          issue,
+        ),
+      ).toEqual([
+        expect.stringContaining('disabled or restricted test case "existing"'),
+      ]);
+    },
+  );
+
+  it.each(['vitest', 'node:test'])(
+    'allows false, preserved and broadened options for %s',
+    (module) => {
+      const imports = `import { it, describe } from '${module}';`;
+      for (const modifier of ['skip', 'todo', 'only']) {
+        for (const [before, after] of [
+          [
+            `it('existing', () => {});`,
+            `describe('group', { ${modifier}: false }, () => {
+              it('existing', { ${modifier}: false }, () => {});
+            });`,
+          ],
+          [
+            `it('existing', { ${modifier}: condition }, () => {});`,
+            `it("existing", { ${modifier}: condition }, () => {});`,
+          ],
+          [
+            `it('existing', { ${modifier}: true }, () => {});`,
+            `it('existing', () => {});`,
+          ],
+        ])
+          expect(
+            changeViolations(
+              [change(`${imports} ${before}`, `${imports} ${after}`)],
+              issue,
+            ),
+          ).toEqual([]);
+      }
+    },
+  );
+
+  it('rejects changing an options execution condition', () => {
+    expect(
+      changeViolations(
+        [
+          change(
+            `it('existing', { skip: first }, () => {});`,
+            `it('existing', { skip: second }, () => {});`,
+          ),
+        ],
+        issue,
+      ),
+    ).toEqual([
+      expect.stringContaining('disabled or restricted test case "existing"'),
+    ]);
+  });
+
+  it.each([
+    `it.only('new', () => {});`,
+    `describe.only('new suite', () => { it('new', () => {}); });`,
+    `describe.only('empty suite', () => {});`,
+    `it('new', { only: true }, () => {});`,
+    `describe('new suite', { only: true }, () => { it('new', () => {}); });`,
+    `suite('empty suite', { only: true }, () => {});`,
+    `test('new', { only: focused }, () => {});`,
+  ])(
+    'rejects introducing exclusivity through an added declaration: %s',
+    (added) => {
+      expect(
+        changeViolations(
+          [change(`it('a', () => {});`, `it('a', () => {}); ${added}`)],
+          issue,
+        ),
+      ).toEqual([expect.stringContaining('introducing only')]);
+    },
+  );
+
+  it('allows preserved exclusivity and false only options on added cases', () => {
+    for (const [before, after] of [
+      [
+        `it('a', () => {}); it.only('focused', () => {});`,
+        `it('a', () => {}); it.only('focused', () => {}); it('new', () => {});`,
+      ],
+      [
+        `it('a', () => {});`,
+        `it('a', () => {}); it('new', { only: false }, () => {});`,
+      ],
+    ])
+      expect(changeViolations([change(before, after)], issue)).toEqual([]);
+  });
+
+  it.each([
+    `it.skip('existing', () => {});`,
+    `it.todo('existing');`,
+    `test.skipIf(true)('existing', () => {});`,
+    `test.runIf(false)('existing', () => {});`,
+    `test.skipIf(condition)('existing', () => {});`,
+    `test.runIf(condition)('existing', () => {});`,
+    `it.only('existing', () => {});`,
+    `it['skip']('existing', () => {});`,
+    `it.skip.each([1])('existing', () => {});`,
+    `test.each\`value\n\${1}\`.skip('existing', () => {});`,
+    `describe.skip('suite', () => { it('existing', () => {}); });`,
+    `describe('outer', () => {
+      describe.skip('inner', () => { it('existing', () => {}); });
+    });`,
+    `describe.skipIf(true)('suite', () => { it('existing', () => {}); });`,
+    `describe.todo('suite', () => { it('existing', () => {}); });`,
+    `describe.only('suite', () => { it('existing', () => {}); });`,
+    `suite.runIf(false)('suite', () => { it('existing', () => {}); });`,
+    `import { describe as group, test as check } from 'vitest';
+      group.skip('suite', () => { check('existing', () => {}); });`,
+    `import { describe as group, it as check } from '@jest/globals';
+      group.skip('suite', () => { check.todo('existing'); });`,
+    `import { describe as group, test as check } from 'node:test';
+      group.skip('suite', () => { check('existing', () => {}); });`,
+  ])('rejects disabling or restricting an existing case: %s', (after) => {
+    expect(
+      changeViolations([change(`it('existing', () => {});`, after)], issue),
+    ).toEqual([
+      expect.stringContaining('disabled or restricted test case "existing"'),
+    ]);
+  });
+
+  it.each([
+    [`it('existing', () => {});`, `it.skipIf(false)('existing', () => {});`],
+    [`it('existing', () => {});`, `it.runIf(true)('existing', () => {});`],
+    [`it('existing', () => {});`, `it.concurrent('existing', () => {});`],
+    [`it.skip('existing', () => {});`, `it('existing', () => {});`],
+    [`it.todo('existing');`, `it('existing', () => {});`],
+    [`it.only('existing', () => {});`, `it('existing', () => {});`],
+    [
+      `it.skipIf(condition)('existing', () => {});`,
+      `it.skipIf( condition )("existing", () => {});`,
+    ],
+    [
+      `describe.skip('suite', () => { it('existing', () => {}); });`,
+      `it.skip('existing', () => {});`,
+    ],
+    [
+      `it('existing', () => {});`,
+      `describe.skipIf(false)('suite', () => { it('existing', () => {}); });`,
+    ],
+  ])('allows preserved or broadened execution: %s -> %s', (before, after) => {
+    expect(changeViolations([change(before, after)], issue)).toEqual([]);
+  });
+
+  it('rejects changing a conditional execution guard', () => {
+    expect(
+      changeViolations(
+        [
+          change(
+            `it.runIf(true)('existing', () => {});`,
+            `it.runIf(false)('existing', () => {});`,
+          ),
+          change(
+            `it.skipIf(first)('conditional', () => {});`,
+            `it.skipIf(second)('conditional', () => {});`,
+          ),
+        ],
+        issue,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('does not leak suite modifiers into sibling cases', () => {
+    const text = `describe.skip('suite', () => { it('skipped', () => {}); });
+      it('existing', () => {});`;
+    expect(
+      changeViolations(
+        [change(text, text.replace(`it('existing'`, `it.skip('existing'`))],
+        issue,
+      ),
+    ).toEqual([
+      expect.stringContaining('disabled or restricted test case "existing"'),
+    ]);
+  });
+
+  it('cannot hide a disabled duplicate behind an already skipped case', () => {
+    const before = `it('same', () => {}); it.skip('same', () => {});`;
+    const after = `it.skip('same', () => {}); it.skip('same', () => {});`;
+    expect(changeViolations([change(before, after)], issue)).toEqual([
+      expect.stringContaining('disabled or restricted test case "same"'),
+    ]);
+    expect(
+      changeViolations(
+        [change(before, `it.skip('same', () => {}); it('same', () => {});`)],
+        issue,
+      ),
+    ).toEqual([]);
+  });
+
+  it('reassigns duplicate matches when execution restrictions overlap', () => {
+    expect(
+      changeViolations(
+        [
+          change(
+            `it.skipIf(a).runIf(b)('same', () => {});
+             it.skipIf(a).only('same', () => {});`,
+            `it.skipIf(a)('same', () => {});
+             it.runIf(b)('same', () => {});`,
+          ),
+        ],
+        issue,
+      ),
+    ).toEqual([]);
+  });
+
   it.each([null, `it('existing', () => {});`])(
     'reports invalid test syntax as a violation with baseline %s',
     (before) => {
@@ -218,6 +502,7 @@ describe('base diff collection', () => {
     write('committed.test.mjs', `it('committed', () => {});`);
     write('staged.test.mjs', `it('staged', () => {});`);
     write('unstaged.test.mjs', `it('unstaged', () => {});`);
+    write('disabled.test.mjs', `it('disabled', () => {});`);
     write('modified-invalid.test.mjs', `it('existing', () => {});`);
     write('deleted.test.mjs', '');
     write('scripts/harness/run.mjs', '// original');
@@ -230,6 +515,10 @@ describe('base diff collection', () => {
     write('staged.test.mjs', '');
     git('add', 'staged.test.mjs');
     write('unstaged.test.mjs', '');
+    write(
+      'disabled.test.mjs',
+      `describe.skip('suite', () => { it('disabled', () => {}); });`,
+    );
     rmSync(join(directory, 'deleted.test.mjs'));
     write('scripts/harness/run.mjs', '// changed');
     write('scripts/harness/new.mjs', '// new');
@@ -242,12 +531,16 @@ describe('base diff collection', () => {
       'committed.test.mjs',
       'staged.test.mjs',
       'unstaged.test.mjs',
+      'disabled.test.mjs',
       'deleted.test.mjs',
       'scripts/harness/run.mjs',
       'scripts/harness/new.mjs',
     ])
       expect(result.output).toContain(path);
     expect(result.output).toContain('removed test case "committed"');
+    expect(result.output).toContain(
+      'disabled.test.mjs: disabled or restricted test case "disabled"',
+    );
     expect(result.output).toContain('deleting an existing test file');
     for (const path of ['invalid.test.mjs', 'modified-invalid.test.mjs'])
       expect(result.output).toContain(
