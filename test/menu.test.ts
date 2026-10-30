@@ -40,6 +40,7 @@ function trustedEventDriver() {
 }
 
 beforeEach(async () => {
+  vi.spyOn(navigator, 'language', 'get').mockReturnValue('en-US');
   fixture = await readFile(
     join('test', 'fixtures', 'ibiza-user-menu.html'),
     'utf8',
@@ -169,6 +170,49 @@ describe('Ibiza resource menu helpers', () => {
 });
 
 describe('profile menu lifecycle', () => {
+  it.each([
+    ['fr-FR', 'Packages d’accès'],
+    ['de-DE', 'Zugriffspakete'],
+    ['hu-HU', 'Access packages'],
+  ])(
+    'injects into a French menu using browser language %s, including after rerenders',
+    async (language, expected) => {
+      vi.useFakeTimers();
+      vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
+      const localizedFixture = await readFile(
+        join('test', 'fixtures', 'ibiza-user-menu-fr.html'),
+        'utf8',
+      );
+      document.body.innerHTML = localizedFixture;
+      const watcher = watchProfileMenu();
+      try {
+        watcher.update();
+        const item = document.querySelector<HTMLElement>(MENU_MARKER)!;
+        expect(item.nextElementSibling?.id).toBe('custom-item');
+        expect(item.textContent?.trim()).toBe(expected);
+        expect(item.getAttribute('aria-label')).toBe(expected);
+        expect(
+          item
+            .querySelector('.fxs-blade-resource-navigation-list-item-text')
+            ?.textContent?.trim(),
+        ).toBe(expected);
+        expect(item.querySelectorAll('svg')).toHaveLength(1);
+        expect(item.querySelector('a, [href], [id]')).toBeNull();
+        expect(
+          document.querySelector('#custom-label')?.textContent?.trim(),
+        ).toBe('Attributs de sécurité personnalisés');
+        document.querySelector('nav')!.outerHTML = localizedFixture;
+        await vi.advanceTimersByTimeAsync(300);
+        expect(document.querySelectorAll(MENU_MARKER)).toHaveLength(1);
+        expect(document.querySelector(MENU_MARKER)?.textContent?.trim()).toBe(
+          expected,
+        );
+      } finally {
+        watcher.dispose();
+      }
+    },
+  );
+
   it('inserts directly above the anchor, survives rerenders without duplicates, and cleans up on navigation', async () => {
     vi.useFakeTimers();
     const watcher = watchProfileMenu();
