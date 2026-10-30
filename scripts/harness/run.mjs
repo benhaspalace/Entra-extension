@@ -416,7 +416,7 @@ try {
       setStatus(
         issue.number,
         config.labels.status.inReview,
-        `Agent harness opened ${pr}.`,
+        `PR opened: ${pr}.`,
       );
       log(`PR: ${pr}`);
     }

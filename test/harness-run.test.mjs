@@ -184,6 +184,20 @@ describe('issue harness publishing policy', () => {
     );
     expect(files.get('pr.md')).toContain('Closes #12');
     expect(files.get('pr.md')).not.toMatch(/agent|model|workflow/i);
+    expect(files.get('comment.md')).toBe(
+      'PR opened: https://example.invalid/pr/12.',
+    );
+    expect(gh).toHaveBeenCalledWith(
+      expect.arrayContaining(['edit', '--add-label', 'agent:in-review']),
+      { allowFail: true },
+    );
+    expect(gh).toHaveBeenCalledWith([
+      'issue',
+      'comment',
+      '12',
+      '--body-file',
+      expect.stringMatching(/comment\.md$/),
+    ]);
   });
 
   it.each([
